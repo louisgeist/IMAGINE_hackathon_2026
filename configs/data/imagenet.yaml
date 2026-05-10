@@ -1,0 +1,15 @@
+_target_: src.data.imagenet_datamodule.ImageNetDataModule
+data_dir: ${paths.data_dir}
+batch_size: 256 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+train_val_split: [0.99, 0.01]
+num_workers: 4
+prefetch_factor: 2
+pin_memory: True
+eval_resize_size: 256
+eval_crop_size: 224
+train_crop_size: 224
+interpolation: 'bilinear'
+hflip_prob: 0.5
+auto_augment_policy: null
+cutmix_alpha: 0.0
+mixup_alpha: 0.0

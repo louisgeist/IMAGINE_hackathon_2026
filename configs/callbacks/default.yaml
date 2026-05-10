@@ -1,0 +1,14 @@
+defaults:
+  - model_checkpoint
+  - rich_progress_bar
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch_{epoch:02d}"
+  monitor: "val/acc"
+  mode: "max"
+  save_last: True
+  auto_insert_metric_name: True
+  every_n_epochs: 45
+  save_on_train_epoch_end: True
