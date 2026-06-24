@@ -1,8 +1,8 @@
 
 <div align="center">
-# IMAGINE Hackathon 2026
 
-How much energy does it *really* take to train a competent vision model?
+# IMAGINE Hackathon 2026
+*How much energy does it really take to train a competent vision model?*
 </div>
 
 In this repo, we train a **ViT-S/16** for **image classification** on the **ImageNet-1k** dataset.
