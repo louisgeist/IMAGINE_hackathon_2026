@@ -22,6 +22,7 @@ codecarbon/*
 predictions/*
 eval_output/
 wandb/
+outputs
 
 !data/.gitkeep
 !logs/.gitkeep
