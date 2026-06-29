@@ -35,7 +35,17 @@ To download our split of ImageNet-1k, run `download_imagenet.sh`:
 ```bash
 ./download_imagenet.sh
 ```
-The download will take a while, but less than an hour. After it finishes, you should find the `train` and `val` partitions under the `data/` folder.
+After the download finishes, you should find the `train` and `val` partitions under the `data/` folder.
+
+If the download is too slow, or if your machine is not in the lab subnetwork, you can download the dataset from HuggingFace:
+```bash
+curl -LsSf https://hf.co/cli/install.sh | bash
+cd data/
+hf download martalorau/IMAGINE_Hackathon --repo-type dataset
+tar -xf train.tar
+tar -xf val.tar
+cd ../
+```
 
 ### uv
 We are going to use the [uv package manager](https://docs.astral.sh/uv/). To install it, run:
