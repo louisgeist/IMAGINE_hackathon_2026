@@ -1,0 +1,21 @@
+# @package _global_
+#
+# Baseline with input downsizing (resolution / 2) for fewer ViT tokens and lower compute.
+# Launch:
+#   uv run src/train.py experiment=arch_baseline_downsize_half
+#
+# For a quick energy comparison, train only a few epochs:
+#   uv run src/train.py experiment=arch_baseline_downsize_half trainer.max_epochs=2
+
+defaults:
+  - override /datamodule: half_size
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+module:
+  net:
+    image_size: 112
+
+experiment_name: "baseline_downsize_half"
+tags: ["baseline", "debug"]

@@ -1,0 +1,7 @@
+defaults:
+  - default
+
+# Input resolution divided by 2 (224 -> 112, 256 -> 128)
+train_crop_size: 112
+eval_crop_size: 112
+eval_resize_size: 128
