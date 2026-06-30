@@ -1,0 +1,14 @@
+# @package _global_
+#
+# ViT-S/16 baseline with RMSNorm replacing LayerNorm everywhere in the transformer.
+# Launch:
+#   uv run src/train.py experiment=arch_rmsnorm
+
+defaults:
+  - override /module: vit_s_16_rmsnorm
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+experiment_name: "rmsnorm"
+tags: ["debug", "train"]

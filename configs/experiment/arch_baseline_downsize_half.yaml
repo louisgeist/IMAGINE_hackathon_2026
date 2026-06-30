@@ -17,5 +17,5 @@ module:
   net:
     image_size: 112
 
-experiment_name: "baseline_downsize_half"
-tags: ["baseline", "debug"]
+experiment_name: "downsize_half"
+tags: ["explore", "train"]

@@ -1,0 +1,9 @@
+defaults:
+  - vit_s_16
+
+# ViT-S/16 with RMSNorm instead of LayerNorm (encoder blocks + final norm)
+net:
+  norm_layer:
+    _target_: torch.nn.RMSNorm
+    _partial_: true
+    eps: 1e-6
