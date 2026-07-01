@@ -116,7 +116,8 @@ class ImageNetDataModule(LightningDataModule):
         :param mixup_alpha: The alpha value for MixUp augmentation. Defaults to `0.0` (no MixUp).
         :param random_erase_prob: The probability of applying random erasing during training. Defaults to `0.0`.
         :param batch_size: The batch size. Defaults to `64`.
-        :param num_workers: The number of workers. Defaults to `0`.
+        :param num_workers: The number of training dataloader workers. Defaults to `4`.
+        :param val_num_workers: The number of validation dataloader workers. Defaults to `4`.
         :param prefetch_factor: The number of batches to prefetch. Defaults to `2`.
         :param pin_memory: Whether to pin memory. Defaults to `False`.
         :param uint8_pipeline: If `True`, images are handed to the model as uint8 tensors and
