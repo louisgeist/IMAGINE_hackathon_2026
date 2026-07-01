@@ -1,0 +1,27 @@
+# @package _global_
+
+# Label smoothing applied only during the FINAL epochs of training (the window
+# [start_epoch, 1.0)). Bounds may be absolute epoch indices (int) or fractions
+# of `trainer.max_epochs` (float in [0, 1]).
+# to execute this experiment run:
+#   uv run src/train.py experiment=label_smoothing_final_epochs
+
+defaults:
+  - override /datamodule: default_q50
+
+module:
+  _target_: src.modules.label_smoothing.LabelSmoothingImageNetModule
+  label_smoothing:
+    _target_: src.modules.label_smoothing.LabelSmoothing
+    alpha: 0.1
+    num_classes: 1000
+    start_epoch: 0.5
+    end_epoch: 1.0
+
+seed: 42
+
+# Remember to define experiment_name and tags in all your experiments!
+# First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
+# Second tag options: train, pre-train, post-train, debug, <custom tag>
+experiment_name: "label_smoothing_final_epochs"
+tags: ["explore", "train"]
