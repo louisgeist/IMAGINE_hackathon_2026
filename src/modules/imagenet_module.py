@@ -1,3 +1,4 @@
+import math
 from typing import Any, Dict, Tuple
 
 import kornia
@@ -57,6 +58,7 @@ class ImageNetModule(LightningModule):
         patch_drop_rate_start: float = 0.0,
         patch_drop_rate_end: float = 0.0,
         patch_drop_rate_end_epoch: int = 1,
+        patch_drop_schedule: str = "linear",
     ) -> None:
         """Initialize an `ImageNetModule`.
 
@@ -136,6 +138,8 @@ class ImageNetModule(LightningModule):
         """Anneal the patch drop rate from high to low, reaching the end value at
         `patch_drop_rate_end_epoch` (training may stop earlier, e.g. via early stopping)."""
         progress = min(self.current_epoch / self.hparams.patch_drop_rate_end_epoch, 1.0)
+        if self.hparams.patch_drop_schedule == "cosine":
+            progress = 0.5 * (1 - math.cos(math.pi * progress))
         self.net.encoder.patch_drop_rate = self.hparams.patch_drop_rate_start + progress * (
             self.hparams.patch_drop_rate_end - self.hparams.patch_drop_rate_start
         )

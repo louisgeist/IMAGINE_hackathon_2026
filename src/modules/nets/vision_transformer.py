@@ -5,12 +5,27 @@ import collections
 import math
 import warnings
 from collections import OrderedDict
-from functools import partial
+from functools import lru_cache, partial
 from itertools import repeat
 from typing import Any, Callable, NamedTuple, Optional, Sequence, Union
 
 import torch
 import torch.nn as nn
+
+
+@lru_cache(maxsize=None)
+def _nested_order(n: int) -> tuple[int, ...]:
+    """Bit-reversal order of [0, n): any prefix is evenly spread, and prefixes are nested
+    (the coords for a smaller prefix are a subset of those for a larger one)."""
+    bits = max(1, (n - 1).bit_length())
+    return tuple(r for i in range(1 << bits) if (r := int(f"{i:0{bits}b}"[::-1], 2)) < n)
+
+
+def _grid_keep_indices(n_side: int, num_keep: int, device: torch.device) -> torch.Tensor:
+    """Flat indices of a nested n_side x n_side grid, kept count close to num_keep."""
+    keep_side = max(1, min(n_side, round(num_keep**0.5)))
+    coords = torch.tensor(_nested_order(n_side)[:keep_side], device=device)
+    return (coords.unsqueeze(1) * n_side + coords.unsqueeze(0)).flatten()
 
 
 class ConvStemConfig(NamedTuple):
@@ -39,6 +54,7 @@ class VisionTransformer(nn.Module):
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         conv_stem_configs: Optional[list[ConvStemConfig]] = None,
         patch_drop_rate: float = 0.0,
+        patch_drop_mode: str = "random",
     ):
         super().__init__()
         torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
@@ -95,6 +111,7 @@ class VisionTransformer(nn.Module):
             attention_dropout,
             norm_layer,
             patch_drop_rate,
+            patch_drop_mode,
         )
         self.seq_length = seq_length
 
@@ -173,7 +190,7 @@ class VisionTransformer(nn.Module):
         batch_class_token = self.class_token.expand(n, -1, -1)
         x = torch.cat([batch_class_token, x], dim=1)
 
-        x = self.encoder(x)
+        x = self.encoder(x, n_side=self.image_size // self.patch_size)
 
         # Classifier "token" as used by standard language architectures
         x = x[:, 0]
@@ -197,6 +214,7 @@ class Encoder(nn.Module):
         attention_dropout: float,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         patch_drop_rate: float = 0.0,
+        patch_drop_mode: str = "random",
     ):
         super().__init__()
         # Note that batch_size is on the first dim because
@@ -206,6 +224,7 @@ class Encoder(nn.Module):
         )  # from BERT
         self.dropout = nn.Dropout(dropout)
         self.patch_drop_rate = patch_drop_rate
+        self.patch_drop_mode = patch_drop_mode
         layers: OrderedDict[str, nn.Module] = OrderedDict()
         for i in range(num_layers):
             layers[f"encoder_layer_{i}"] = EncoderBlock(
@@ -219,7 +238,7 @@ class Encoder(nn.Module):
         self.layers = nn.Sequential(layers)
         self.ln = norm_layer(hidden_dim)
 
-    def forward(self, input: torch.Tensor):
+    def forward(self, input: torch.Tensor, n_side: Optional[int] = None):
         torch._assert(
             input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}"
         )
@@ -228,7 +247,12 @@ class Encoder(nn.Module):
         if self.training and self.patch_drop_rate > 0:
             cls_token, patches = input[:, :1], input[:, 1:]
             num_keep = max(1, int(patches.shape[1] * (1 - self.patch_drop_rate)))
-            keep_idx = torch.rand(patches.shape[:2], device=patches.device).argsort(dim=1)[:, :num_keep]
+            if self.patch_drop_mode == "grid":
+                # deterministic, evenly-spaced patches (like downsampling resolution), same for every sample
+                keep_idx = _grid_keep_indices(n_side, num_keep, patches.device)
+                keep_idx = keep_idx.unsqueeze(0).expand(patches.shape[0], -1)
+            else:
+                keep_idx = torch.rand(patches.shape[:2], device=patches.device).argsort(dim=1)[:, :num_keep]
             patches = torch.gather(patches, 1, keep_idx.unsqueeze(-1).expand(-1, -1, patches.shape[-1]))
             input = torch.cat([cls_token, patches], dim=1)
 

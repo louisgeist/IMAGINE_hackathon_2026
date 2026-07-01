@@ -12,6 +12,9 @@ module:
   patch_drop_rate_start: 0.75
   patch_drop_rate_end: 0.0
   patch_drop_rate_end_epoch: 15
+  patch_drop_schedule: "linear" # "linear" or "cosine"
+  net:
+    patch_drop_mode: "random" # "random" or "grid" (nested grids of patches, like increasing resolution little by little.)
 
 experiment_name: "patch_drop"
 tags: ["ablate", "train"]
