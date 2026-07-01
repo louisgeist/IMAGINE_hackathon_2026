@@ -12,7 +12,7 @@ defaults:
 seed: 42
 
 trainer:
-  precision: 32
+  precision: 16-mixed
 
 module:
   compile: false
