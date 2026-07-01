@@ -5,6 +5,7 @@
 
 defaults:
   - override /module: vit_s_16_pom
+  - override /datamodule: jpeg
 
 datamodule:
   prefetch_factor: 2
@@ -12,5 +13,5 @@ datamodule:
 # Remember to define experiment_name and tags in all your experiments!
 # First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
 # Second tag options: train, pre-train, post-train, debug, <custom tag>
-experiment_name: "pom"
+experiment_name: "pom_jpeg"
 tags: ["final", "train"]
