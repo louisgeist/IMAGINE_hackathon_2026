@@ -1,0 +1,8 @@
+# @package _global_.module.net.encoder
+_target_: src.modules.nets.vision_transformer.Encoder
+_partial_: true
+num_layers: 12
+num_heads: 6
+mlp_dim: 1536
+dropout: 0.0
+attention_dropout: 0.0
