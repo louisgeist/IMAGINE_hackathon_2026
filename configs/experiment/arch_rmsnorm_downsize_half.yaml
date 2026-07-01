@@ -1,0 +1,19 @@
+# @package _global_
+#
+# ViT-S/16 baseline with RMSNorm replacing LayerNorm everywhere in the transformer. Input downsized by 2.
+# Launch:
+#   uv run src/train.py experiment=arch_rmsnorm_downsize_half
+
+defaults:
+  - override /datamodule: half_size
+  - override /module: vit_s_16_rmsnorm
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+module:
+  net:
+    image_size: 112
+
+experiment_name: "rmsnorm_and_downsize_half"
+tags: ["debug", "train"]
