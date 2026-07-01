@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import kornia
 import torch
@@ -59,6 +59,8 @@ class ImageNetModule(LightningModule):
         patch_drop_rate_end: float = 0.0,
         patch_drop_rate_end_epoch: int = 1,
         patch_drop_schedule: str = "linear",
+        patch_drop_update_every: int = 1,
+        compile_dynamic: Optional[bool] = None,
     ) -> None:
         """Initialize an `ImageNetModule`.
 
@@ -136,7 +138,10 @@ class ImageNetModule(LightningModule):
 
     def on_train_epoch_start(self) -> None:
         """Anneal the patch drop rate from high to low, reaching the end value at
-        `patch_drop_rate_end_epoch` (training may stop earlier, e.g. via early stopping)."""
+        `patch_drop_rate_end_epoch`.
+        Only updated every `patch_drop_update_every` epochs, to avoid torch.compile every single epoch."""
+        if self.current_epoch % self.hparams.patch_drop_update_every != 0:
+            return
         progress = min(self.current_epoch / self.hparams.patch_drop_rate_end_epoch, 1.0)
         if self.hparams.patch_drop_schedule == "cosine":
             progress = 0.5 * (1 - math.cos(math.pi * progress))
@@ -260,7 +265,7 @@ class ImageNetModule(LightningModule):
         :param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
         """
         if self.hparams.compile and stage == "fit":
-            self.net = torch.compile(self.net)
+            self.net = torch.compile(self.net, dynamic=self.hparams.compile_dynamic)
 
     def configure_optimizers(self) -> Dict[str, Any]:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.

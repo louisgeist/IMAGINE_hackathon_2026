@@ -13,6 +13,8 @@ module:
   patch_drop_rate_end: 0.0
   patch_drop_rate_end_epoch: 15
   patch_drop_schedule: "linear" # "linear" or "cosine"
+  patch_drop_update_every: 3 # epochs between patch drop rate updates (avoids a torch.compile recompile every epoch)
+  compile_dynamic: null # set to true to let torch.compile trace the token dimension as dynamic instead
   net:
     patch_drop_mode: "random" # "random" or "grid" (nested grids of patches, like increasing resolution little by little.)
 
