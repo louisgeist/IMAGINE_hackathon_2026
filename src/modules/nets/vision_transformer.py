@@ -38,6 +38,7 @@ class VisionTransformer(nn.Module):
         representation_size: Optional[int] = None,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         conv_stem_configs: Optional[list[ConvStemConfig]] = None,
+        patch_drop_rate: float = 0.0,
     ):
         super().__init__()
         torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
@@ -93,6 +94,7 @@ class VisionTransformer(nn.Module):
             dropout,
             attention_dropout,
             norm_layer,
+            patch_drop_rate,
         )
         self.seq_length = seq_length
 
@@ -194,6 +196,7 @@ class Encoder(nn.Module):
         dropout: float,
         attention_dropout: float,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
+        patch_drop_rate: float = 0.0,
     ):
         super().__init__()
         # Note that batch_size is on the first dim because
@@ -202,6 +205,7 @@ class Encoder(nn.Module):
             torch.empty(1, seq_length, hidden_dim).normal_(std=0.02)
         )  # from BERT
         self.dropout = nn.Dropout(dropout)
+        self.patch_drop_rate = patch_drop_rate
         layers: OrderedDict[str, nn.Module] = OrderedDict()
         for i in range(num_layers):
             layers[f"encoder_layer_{i}"] = EncoderBlock(
@@ -220,6 +224,14 @@ class Encoder(nn.Module):
             input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}"
         )
         input = input + self.pos_embedding
+
+        if self.training and self.patch_drop_rate > 0:
+            cls_token, patches = input[:, :1], input[:, 1:]
+            num_keep = max(1, int(patches.shape[1] * (1 - self.patch_drop_rate)))
+            keep_idx = torch.rand(patches.shape[:2], device=patches.device).argsort(dim=1)[:, :num_keep]
+            patches = torch.gather(patches, 1, keep_idx.unsqueeze(-1).expand(-1, -1, patches.shape[-1]))
+            input = torch.cat([cls_token, patches], dim=1)
+
         return self.ln(self.layers(self.dropout(input)))
 
 

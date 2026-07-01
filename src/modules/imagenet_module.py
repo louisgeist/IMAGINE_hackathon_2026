@@ -54,6 +54,9 @@ class ImageNetModule(LightningModule):
         num_classes: int = 1000,
         warmup_scheduler: torch.optim.lr_scheduler = None,
         uint8_pipeline: bool = True,
+        patch_drop_rate_start: float = 0.0,
+        patch_drop_rate_end: float = 0.0,
+        patch_drop_rate_end_epoch: int = 1,
     ) -> None:
         """Initialize an `ImageNetModule`.
 
@@ -128,6 +131,14 @@ class ImageNetModule(LightningModule):
         self.val_loss.reset()
         self.val_acc1.reset()
         self.val_acc5.reset()
+
+    def on_train_epoch_start(self) -> None:
+        """Anneal the patch drop rate from high to low, reaching the end value at
+        `patch_drop_rate_end_epoch` (training may stop earlier, e.g. via early stopping)."""
+        progress = min(self.current_epoch / self.hparams.patch_drop_rate_end_epoch, 1.0)
+        self.net.encoder.patch_drop_rate = self.hparams.patch_drop_rate_start + progress * (
+            self.hparams.patch_drop_rate_end - self.hparams.patch_drop_rate_start
+        )
 
     def model_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor]

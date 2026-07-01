@@ -1,0 +1,17 @@
+# @package _global_
+
+# to execute this experiment run:
+# uv run src/train.py experiment=patch_drop
+
+defaults:
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+module:
+  patch_drop_rate_start: 0.75
+  patch_drop_rate_end: 0.0
+  patch_drop_rate_end_epoch: 15
+
+experiment_name: "patch_drop"
+tags: ["ablate", "train"]
