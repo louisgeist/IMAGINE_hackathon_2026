@@ -1,0 +1,10 @@
+# @package _global_.module.net.encoder
+_target_: src.modules.nets.pom_encoder.PomEncoder
+_partial_: true
+num_layers: 12
+n_sel_heads: 6
+n_groups: 1
+mlp_dim: 1536
+dropout: 0.0
+pom_degree: 2
+pom_expansion: 2

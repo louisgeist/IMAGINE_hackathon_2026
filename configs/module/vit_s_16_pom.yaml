@@ -1,0 +1,31 @@
+defaults:
+  - /encoder: pom
+
+_target_: src.modules.imagenet_module.ImageNetModule
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-3
+  weight_decay: 1e-4
+
+main_scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: null # Requires knowing total number of training steps, initialized in train.py
+    eta_min: 0
+
+warmup_steps: 1e4
+
+warmup_scheduler:
+    _target_: torch.optim.lr_scheduler.LinearLR
+    _partial_: true
+    start_factor: 1e-2
+    total_iters: ${module.warmup_steps}
+
+# ViT-S/16 with PoM encoder
+net:
+  _target_: src.modules.nets.vision_transformer.VisionTransformer
+  image_size: 224
+  patch_size: 16
+  hidden_dim: 384
