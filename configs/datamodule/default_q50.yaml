@@ -1,0 +1,5 @@
+defaults:
+  - default.yaml
+
+train_dir: 'train_q50'
+val_dir: 'val_q50'
