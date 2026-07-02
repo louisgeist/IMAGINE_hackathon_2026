@@ -1,24 +1,5 @@
-_target_: src.modules.imagenet_module.ImageNetModule
-
-optimizer:
-  _target_: torch.optim.AdamW
-  _partial_: true
-  lr: 1e-3
-  weight_decay: 1e-4
-
-main_scheduler:
-    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
-    _partial_: true
-    T_max: null # Requires knowing total number of training steps, initialized in train.py
-    eta_min: 0
-
-warmup_steps: 1e4
-
-warmup_scheduler:
-    _target_: torch.optim.lr_scheduler.LinearLR
-    _partial_: true
-    start_factor: 1e-2
-    total_iters: ${module.warmup_steps}
+defaults:
+ - vit_s_16.yaml
 
 # p4 group-equivariant CNN (rotation + translation equivariant), ResNet-18 layout.
 net:
