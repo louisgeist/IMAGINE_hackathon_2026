@@ -1,0 +1,39 @@
+_target_: src.modules.imagenet_module.ImageNetModule
+
+# Same optimization scheme as the ViT-S/16 baseline (configs/module/vit_s_16.yaml),
+# only the network is swapped for ScalableViT so the comparison stays fair.
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-3
+  weight_decay: 1e-4
+
+main_scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: null # requires knowing total number of training steps initialized in train.py
+    eta_min: 0
+
+warmup_steps: 1e4
+
+warmup_scheduler:
+    _target_: torch.optim.lr_scheduler.LinearLR
+    _partial_: true
+    start_factor: 1e-2
+    total_iters: ${module.warmup_steps}
+
+net:
+  _target_: src.modules.nets.scalable_vit.ScalableViT
+  img_size: 224
+  patch_size: 4
+  in_chans: 3
+  num_classes: 1000
+  embed_dims: [64, 128, 256, 512]
+  num_heads: [2, 4, 8, 16]
+  mlp_ratios: [4, 4, 4, 4]
+  qkv_bias: true
+  depths: [2, 2, 20, 2]
+  sr_ratios: [8, 4, 2, 1]
+  wss: [7, 7, 7, 7]
+  c_ratios: [1.25, 1.25, 1.25, 1]
+  drop_path_rate: 0.2
