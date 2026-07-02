@@ -37,3 +37,4 @@ net:
   wss: [7, 7, 7, 7]
   c_ratios: [1.25, 1.25, 1.25, 1]
   drop_path_rate: 0.2
+  plain_head: false # plain Linear head (~0.5M params) instead of the 4096-wide MLP head (~6.2M)
