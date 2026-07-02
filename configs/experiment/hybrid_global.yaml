@@ -14,4 +14,4 @@ datamodule:
 # First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
 # Second tag options: train, pre-train, post-train, debug, <custom tag>
 experiment_name: "hybrid_global_jpeg"
-tags: ["explore", "train"]
+tags: ["final", "train"]
