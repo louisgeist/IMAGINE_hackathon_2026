@@ -1,9 +1,12 @@
 from typing import Any, Dict, Tuple
 
+import kornia
 import torch
+from kornia import augmentation as aug
 from lightning import LightningModule
 from torchmetrics import MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
+from torchvision.transforms import v2 as T
 
 
 class ImageNetModule(LightningModule):
@@ -46,6 +49,9 @@ class ImageNetModule(LightningModule):
         optimizer: torch.optim.Optimizer,
         warmup_steps: int,
         main_scheduler: torch.optim.lr_scheduler,
+        mixup_alpha: float,
+        cutmix_alpha: float,
+        num_classes: int = 1000,
         warmup_scheduler: torch.optim.lr_scheduler = None,
     ) -> None:
         """Initialize an `ImageNetModule`.
@@ -62,6 +68,28 @@ class ImageNetModule(LightningModule):
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=True, ignore=["net"])
+
+        imagenet_mean = (0.485, 0.456, 0.406)
+        imagenet_std = (0.229, 0.224, 0.225)
+        self.normalise = aug.Normalize(mean=imagenet_mean, std=imagenet_std)
+        self.mixup_alpha = mixup_alpha
+        self.cutmix_alpha = cutmix_alpha
+
+        mixup_cutmix = []
+        if mixup_alpha > 0:
+            mixup_cutmix.append(T.MixUp(alpha=mixup_alpha, num_classes=num_classes))
+        if cutmix_alpha > 0:
+            mixup_cutmix.append(T.CutMix(alpha=cutmix_alpha, num_classes=num_classes))
+
+        self.cutmix_mixup = T.RandomChoice(mixup_cutmix)
+
+        self.train_augmentations = aug.AugmentationSequential(
+            aug.Normalize(mean=imagenet_mean, std=imagenet_std),
+            # Add more here if necessary
+        )
+        self.valid_augmentations = aug.AugmentationSequential(
+            aug.Normalize(mean=imagenet_mean, std=imagenet_std)
+        )
 
         self.net = net
 
@@ -125,50 +153,78 @@ class ImageNetModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
+        source, targets = batch
+        source = source.float() / 255.0
+        source = self.train_augmentations(source)
+        batch = (source, targets)
+        batch = self.cutmix_mixup(batch)
+
         loss, logits, targets = self.model_step(batch)
 
         # update and log metrics
-        self.train_loss(loss)
-        self.train_acc1(logits, targets)
-        self.train_acc5(logits, targets)
-        self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc1", self.train_acc1, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc5", self.train_acc5, on_step=True, on_epoch=True, prog_bar=True)
+        self.train_loss(loss.detach())
+        self.train_acc1(logits.detach(), targets.detach())
+        self.train_acc5(logits.detach(), targets.detach())
+        self.log(
+            "train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True
+        )
+        self.log(
+            "train/acc1", self.train_acc1, on_step=True, on_epoch=True, prog_bar=True
+        )
+        self.log(
+            "train/acc5", self.train_acc5, on_step=True, on_epoch=True, prog_bar=True
+        )
 
         # return loss or backpropagation will fail
         return loss
 
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> None:
         """Perform a single validation step on a batch of data from the validation set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
             labels.
         :param batch_idx: The index of the current batch.
         """
+        source, targets = batch
+        source = source.float() / 255.0
+        source = self.valid_augmentations(source)
+        batch = (source, targets)
         loss, logits, targets = self.model_step(batch)
 
         # update and log metrics
-        self.val_loss(loss)
-        self.val_acc1(logits, targets)
-        self.val_acc5(logits, targets)
+        self.val_loss(loss.detach())
+        self.val_acc1(logits.detach(), targets.detach())
+        self.val_acc5(logits.detach(), targets.detach())
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc1", self.val_acc1, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc5", self.val_acc5, on_step=False, on_epoch=True, prog_bar=True)
 
-    def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def test_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> None:
         """Perform a single test step on a batch of data from the test set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
             labels.
         :param batch_idx: The index of the current batch.
         """
+        source, targets = batch
+        source = source.float() / 255.0
+        source = self.valid_augmentations(source)
+
         _, logits, targets = self.model_step(batch)
 
         # update and log metrics
-        self.test_acc1(logits, targets)
-        self.test_acc5(logits, targets)
-        self.log("test/acc1", self.test_acc1, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test/acc5", self.test_acc5, on_step=False, on_epoch=True, prog_bar=True)
+        self.test_acc1(logits.detach(), targets.detach())
+        self.test_acc5(logits.detach(), targets.detach())
+        self.log(
+            "test/acc1", self.test_acc1, on_step=False, on_epoch=True, prog_bar=True
+        )
+        self.log(
+            "test/acc5", self.test_acc5, on_step=False, on_epoch=True, prog_bar=True
+        )
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called at the beginning of fit (train + validate), validate,

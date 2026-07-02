@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import torch
 import torchvision.transforms.v2 as T
 from lightning import LightningDataModule
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 from torchvision.datasets import ImageFolder
@@ -125,29 +126,57 @@ class ImageNetDataModule(LightningDataModule):
         self.save_hyperparameters(logger=False)
 
         # data transformations
-        interpolation_mode = T.InterpolationMode(interpolation)
-        imagenet_mean = (0.485, 0.456, 0.406)
-        imagenet_std = (0.229, 0.224, 0.225)
+        self.auto_augment_policy = auto_augment_policy
+        self.interpolation = interpolation
+
+        self.train_crop_size = train_crop_size
+        self.eval_resize_size = eval_resize_size
+        self.eval_crop_size = eval_crop_size
+
+        self.hflip_prob = hflip_prob
+        self.augmix_severity = augmix_severity
+
+        self.ra_magnitude = ra_magnitude
+        self.random_erase_prob = random_erase_prob
+
+        # if cutmix_alpha or mixup_alpha:
+        self.collate_fn = default_collate
+
+        self.data_train: Optional[Dataset] = None
+        self.data_val: Optional[Dataset] = None
+        self.data_test: Optional[Dataset] = None
+
+        self.batch_size_per_device = batch_size
+
+    def _get_train_augmentations(self) -> Callable:
+        interpolation_mode = T.InterpolationMode(self.interpolation)
         train_transforms = []
         train_transforms.append(
-            T.RandomResizedCrop(train_crop_size, interpolation=interpolation_mode)
+            T.RandomResizedCrop(self.train_crop_size, interpolation=interpolation_mode)
         )
-        if hflip_prob > 0:
-            train_transforms.append(T.RandomHorizontalFlip(hflip_prob))
+        if self.hflip_prob > 0:
+            train_transforms.append(T.RandomHorizontalFlip(self.hflip_prob))
 
-        if auto_augment_policy is not None:
-            if auto_augment_policy == "ra":
+        if self.auto_augment_policy is not None:
+            if self.auto_augment_policy == "ra":
                 train_transforms.append(
-                    T.RandAugment(interpolation=interpolation_mode, magnitude=ra_magnitude)
+                    T.RandAugment(
+                        interpolation=interpolation_mode,
+                        magnitude=self.ra_magnitude,
+                    )
                 )
-            elif auto_augment_policy == "ta_wide":
-                train_transforms.append(T.TrivialAugmentWide(interpolation=interpolation_mode))
-            elif auto_augment_policy == "augmix":
+            elif self.auto_augment_policy == "ta_wide":
                 train_transforms.append(
-                    T.AugMix(interpolation=interpolation_mode, severity=augmix_severity)
+                    T.TrivialAugmentWide(interpolation=interpolation_mode)
+                )
+            elif self.auto_augment_policy == "augmix":
+                train_transforms.append(
+                    T.AugMix(
+                        interpolation=interpolation_mode, severity=self.augmix_severity
+                    )
                 )
             else:
-                aa_policy = T.AutoAugmentPolicy(auto_augment_policy)
+                aa_policy = T.AutoAugmentPolicy(self.auto_augment_policy)
                 train_transforms.append(
                     T.AutoAugment(policy=aa_policy, interpolation=interpolation_mode)
                 )
@@ -155,40 +184,27 @@ class ImageNetDataModule(LightningDataModule):
         train_transforms.extend(
             [
                 T.PILToTensor(),
-                T.ToDtype(torch.float, scale=True),
-                T.Normalize(mean=imagenet_mean, std=imagenet_std),
+                # T.ToDtype(torch.float, scale=True),
+                # T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std),
             ]
         )
-        if random_erase_prob > 0:
-            train_transforms.append(T.RandomErasing(p=random_erase_prob))
+        # if self.random_erase_prob > 0:
+        #     train_transforms.append(T.RandomErasing(p=self.random_erase_prob))
         train_transforms.append(T.ToPureTensor())
-        self.train_transforms = T.Compose(train_transforms)
+        return T.Compose(train_transforms)
 
-        self.eval_transforms = T.Compose(
+    def _get_eval_augmentations(self) -> Callable:
+        interpolation_mode = T.InterpolationMode(self.interpolation)
+        return T.Compose(
             [
-                T.Resize(eval_resize_size, interpolation=interpolation_mode),
-                T.CenterCrop(eval_crop_size),
+                T.Resize(self.eval_resize_size, interpolation=interpolation_mode),
+                T.CenterCrop(self.eval_crop_size),
                 T.PILToTensor(),
-                T.ToDtype(torch.float, scale=True),
-                T.Normalize(mean=imagenet_mean, std=imagenet_std),
+                T.ToDtype(torch.uint8, scale=True),
+                # T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std),
                 T.ToPureTensor(),
             ]
         )
-
-        if cutmix_alpha or mixup_alpha:
-            mixup_cutmix = self._get_mixup_cutmix(
-                mixup_alpha=mixup_alpha,
-                cutmix_alpha=cutmix_alpha,
-            )
-            self.collate_fn = lambda batch: mixup_cutmix(*default_collate(batch))
-        else:
-            self.collate_fn = default_collate
-
-        self.data_train: Optional[Dataset] = None
-        self.data_val: Optional[Dataset] = None
-        self.data_test: Optional[Dataset] = None
-
-        self.batch_size_per_device = batch_size
 
     @property
     def num_classes(self) -> int:
@@ -234,13 +250,13 @@ class ImageNetDataModule(LightningDataModule):
             if not self.data_train:
                 self.data_train = ImageFolder(
                     os.path.join(self.hparams.data_path, self.hparams.train_dir),
-                    transform=self.train_transforms,
+                    transform=self._get_train_augmentations(),
                 )
 
             if not self.data_val:
                 self.data_val = ImageFolder(
                     os.path.join(self.hparams.data_path, self.hparams.val_dir),
-                    transform=self.eval_transforms,
+                    transform=self._get_eval_augmentations(),
                 )
 
     def train_dataloader(self) -> DataLoader[Any]:
@@ -321,9 +337,13 @@ class ImageNetDataModule(LightningDataModule):
     def _get_mixup_cutmix(self, mixup_alpha, cutmix_alpha):
         mixup_cutmix = []
         if mixup_alpha > 0:
-            mixup_cutmix.append(T.MixUp(alpha=mixup_alpha, num_classes=self.num_classes))
+            mixup_cutmix.append(
+                T.MixUp(alpha=mixup_alpha, num_classes=self.num_classes)
+            )
         if cutmix_alpha > 0:
-            mixup_cutmix.append(T.CutMix(alpha=cutmix_alpha, num_classes=self.num_classes))
+            mixup_cutmix.append(
+                T.CutMix(alpha=cutmix_alpha, num_classes=self.num_classes)
+            )
         if not mixup_cutmix:
             return None
 

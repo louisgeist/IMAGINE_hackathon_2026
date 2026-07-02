@@ -6,12 +6,13 @@ import hydra
 import lightning as L
 import rootutils
 import torch
-from codecarbon import EmissionsTracker
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.callbacks.early_stopping import EarlyStoppingReason
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 from torch.nn.attention import SDPBackend, sdpa_kernel
+
+from codecarbon import EmissionsTracker
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -75,7 +76,11 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         )
 
     log.info(f"Instantiating module <{cfg.module._target_}>")
-    model: LightningModule = hydra.utils.instantiate(cfg.module)
+    model: LightningModule = hydra.utils.instantiate(
+        cfg.module,
+        cutmix_alpha=cfg.datamodule.cutmix_alpha,
+        mixup_alpha=cfg.datamodule.mixup_alpha,
+    )
 
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
@@ -85,7 +90,9 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     callbacks: List[Callback] = list(callback_dict.values())
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=logger
+    )
 
     if "codecarbon" in cfg:
         log.info("Instantiating CodeCarbon tracker...")
