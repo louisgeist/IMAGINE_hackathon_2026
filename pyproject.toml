@@ -12,6 +12,7 @@ dependencies = [
     "kornia>=0.8.3",
     "lightning<=2.6.1",
     "pandas>=3.0.3",
+    "muon-optimizer",
     "nltk>=3.9.4",
     "rich>=15.0.0",
     "rootutils>=1.0.7",
@@ -25,6 +26,7 @@ dependencies = [
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 codecarbon = { git = "https://github.com/Archiel19/codecarbon.git", branch = "wandb" }
+muon-optimizer = { git = "https://github.com/KellerJordan/Muon" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
