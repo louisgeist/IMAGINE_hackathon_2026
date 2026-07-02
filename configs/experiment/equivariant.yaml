@@ -1,0 +1,25 @@
+# @package _global_
+
+# p4 group-equivariant CNN: translation- and 90-degree-rotation-equivariant.
+# to execute this experiment run:
+#   uv run src/train.py experiment=equivariant
+
+defaults:
+  - override /module: equivariant
+  - override /datamodule: default_q50
+
+seed: 42
+
+# Remember to define experiment_name and tags in all your experiments!
+# First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
+# Second tag options: train, pre-train, post-train, debug, <custom tag>
+experiment_name: "equivariant"
+tags: ["explore", "train"]
+
+# Group convolutions and rot90/roll weight transforms don't trace cleanly under
+# torch.compile; keep it off for correctness/stability.
+module:
+  compile: false
+
+datamodule:
+  num_workers_train: 2
