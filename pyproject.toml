@@ -12,6 +12,7 @@ dependencies = [
     "kornia>=0.8.3",
     "lightning<=2.6.1",
     "pandas>=3.0.3",
+    "nltk>=3.9.4",
     "rich>=15.0.0",
     "rootutils>=1.0.7",
     "scipy>=1.17.1",
