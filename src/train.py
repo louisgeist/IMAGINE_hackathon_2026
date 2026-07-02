@@ -116,10 +116,12 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log_hyperparameters(object_dict)
 
     log.info("Starting training!")
-    with tracker, sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+    with tracker, sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
         # Note: Flash Attention only works with mixed precision, otherwise you will see:
         #   RuntimeError('No available kernel. Aborting execution.')
         # when calling `scaled_dot_product_attention`
+        # EFFICIENT_ATTENTION is the fallback for attentions flash cannot handle,
+        # e.g. ScalableViT's SSA where q/k and v head dims differ (c_ratio > 1)
         trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
 
     # Check why training stopped

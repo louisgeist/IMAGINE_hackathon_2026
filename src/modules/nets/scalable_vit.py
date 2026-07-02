@@ -149,11 +149,14 @@ class IWSA(nn.Module):
         v_shape_inter = self.win2img(v, H, W) # shape=(B, C, H, W)
         v_info_inter = self.lim(v_shape_inter, self.lim_func)  # shape=(B, N, C)
 
+        # flatten (B, h_g*w_g) into the batch dim: fused SDPA kernels only take 4-D tensors
         attn = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=self.attn_drop_p if self.training else 0.0, scale=self.scale
+            q.flatten(0, 1), k.flatten(0, 1), v.flatten(0, 1),
+            dropout_p=self.attn_drop_p if self.training else 0.0, scale=self.scale
         )
-        # shape: (B, h_g*w_g, num_heads, ws*ws, head_dim) -> (B, h_g*w_g, ws*ws, num_heads, head_dim)
+        # shape: (B*h_g*w_g, num_heads, ws*ws, head_dim) -> (B, h_g*w_g, ws*ws, num_heads, head_dim)
         # -> (B, h_g, w_g, ws, ws, num_heads*head_dim)
+        attn = attn.reshape(B, h_group * w_group, self.num_heads, -1, C // self.num_heads)
         attn = attn.transpose(2, 3).reshape(B, h_group, w_group, self.ws, self.ws, C)
         x = attn.transpose(2, 3).reshape(B, N, C)
         x = x + v_info_inter
