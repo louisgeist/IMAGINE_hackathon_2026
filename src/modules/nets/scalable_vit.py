@@ -8,6 +8,7 @@ from itertools import repeat
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.init import trunc_normal_
 
 
@@ -87,7 +88,7 @@ class IWSA(nn.Module):
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop_p = attn_drop
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         self.ws = ws
@@ -148,12 +149,12 @@ class IWSA(nn.Module):
         v_shape_inter = self.win2img(v, H, W) # shape=(B, C, H, W)
         v_info_inter = self.lim(v_shape_inter, self.lim_func)  # shape=(B, N, C)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale  # shape=(B, h_g*w_g, n_head, ws*ws, ws*ws)
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+        attn = F.scaled_dot_product_attention(
+            q, k, v, dropout_p=self.attn_drop_p if self.training else 0.0, scale=self.scale
+        )
         # shape: (B, h_g*w_g, num_heads, ws*ws, head_dim) -> (B, h_g*w_g, ws*ws, num_heads, head_dim)
         # -> (B, h_g, w_g, ws, ws, num_heads*head_dim)
-        attn = (attn @ v).transpose(2, 3).reshape(B, h_group, w_group, self.ws, self.ws, C)
+        attn = attn.transpose(2, 3).reshape(B, h_group, w_group, self.ws, self.ws, C)
         x = attn.transpose(2, 3).reshape(B, N, C)
         x = x + v_info_inter
         x = self.proj(x)
@@ -202,7 +203,7 @@ class SSA(nn.Module):
             self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
 
         self.proj = nn.Linear(dim, dim)
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop_p = attn_drop
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x, H, W):
@@ -221,11 +222,10 @@ class SSA(nn.Module):
             kv = self.kv(x).reshape(B, -1, 2, self.num_heads, int(C / self.num_heads)).permute(2, 0, 3, 1, 4)
             k, v = kv[0], kv[1]
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = F.scaled_dot_product_attention(
+            q, k, v, dropout_p=self.attn_drop_p if self.training else 0.0, scale=self.scale
+        )
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
