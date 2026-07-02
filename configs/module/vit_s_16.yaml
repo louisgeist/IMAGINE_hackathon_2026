@@ -25,3 +25,6 @@ net:
   image_size: 224
   patch_size: 16
   hidden_dim: 384
+  mlp_dim: 1536
+  pos_embedding_type: learned  # 'learned' (default) or 'sincos' (fixed 2D sine-cosine)
+

@@ -56,6 +56,7 @@ class VisionTransformer(nn.Module):
         conv_stem_configs: Optional[list[ConvStemConfig]] = None,
         patch_drop_rate: float = 0.0,
         patch_drop_mode: str = "random",
+        pos_embedding_type: str = "learned",
     ):
         super().__init__()
         torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
@@ -190,6 +191,105 @@ class VisionTransformer(nn.Module):
         return x
 
 
+def build_2d_sincos_pos_embedding(
+    seq_length: int, hidden_dim: int, has_class_token: bool = True, temperature: float = 10000.0
+) -> torch.Tensor:
+    """Fixed 2D sine-cosine positional embedding (as in MAE / DeiT-III).
+
+    Returns a (1, seq_length, hidden_dim) tensor. When ``has_class_token`` is True the first
+    position is left as zeros to align with the prepended ``[CLS]`` token.
+    """
+    n_patches = seq_length - 1 if has_class_token else seq_length
+    grid = int(math.isqrt(n_patches))
+    torch._assert(grid * grid == n_patches, "sincos pos-embed requires a square patch grid")
+    torch._assert(hidden_dim % 4 == 0, "hidden_dim must be divisible by 4 for 2D sincos")
+    gy, gx = torch.meshgrid(torch.arange(grid), torch.arange(grid), indexing="ij")
+    dim4 = hidden_dim // 4
+    omega = 1.0 / (temperature ** (torch.arange(dim4) / dim4))
+    ox = gx.flatten()[:, None] * omega[None, :]
+    oy = gy.flatten()[:, None] * omega[None, :]
+    pe = torch.cat([ox.sin(), ox.cos(), oy.sin(), oy.cos()], dim=1)  # (n_patches, hidden_dim)
+    if has_class_token:
+        pe = torch.cat([torch.zeros(1, hidden_dim), pe], dim=0)
+    return pe.unsqueeze(0)  # (1, seq_length, hidden_dim)
+
+
+class RotaryEmbedding(nn.Module):
+    """1D Rotary Position Embedding (RoPE) from RoFormer (Su et al., 2021, arXiv:2104.09864).
+
+    Precomputes cos/sin tables for a fixed sequence length and rotates query/key tensors of
+    shape ``(batch, num_heads, seq_length, head_dim)``. Token 0 (the ``[CLS]`` token) sits at
+    position 0, where the rotation angle is 0, i.e. it is left unrotated.
+
+    This uses the half-split ("rotate_half") formulation popularised by GPT-NeoX/LLaMA, which
+    is equivalent to the paper's block-diagonal rotation matrix up to a fixed permutation of
+    the (learned) channel dimensions, and preserves RoPE's defining relative-position property
+    ``<f(q, m), f(k, n)>`` depending only on ``m - n``.
+    """
+
+    def __init__(self, head_dim: int, seq_length: int, base: float = 10000.0):
+        super().__init__()
+        torch._assert(head_dim % 2 == 0, "RoPE requires an even head dimension")
+        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))  # (head_dim/2,)
+        positions = torch.arange(seq_length).float()  # (seq_length,)
+        freqs = torch.outer(positions, inv_freq)  # (seq_length, head_dim/2)
+        emb = torch.cat([freqs, freqs], dim=-1)  # (seq_length, head_dim)
+        # (1, 1, seq_length, head_dim) so it broadcasts over batch and heads.
+        self.register_buffer("cos", emb.cos()[None, None], persistent=False)
+        self.register_buffer("sin", emb.sin()[None, None], persistent=False)
+
+    @staticmethod
+    def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat([-x2, x1], dim=-1)
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # Cast tables to the (possibly fp16 under AMP) dtype of q/k to keep SDPA inputs consistent.
+        cos = self.cos.to(dtype=q.dtype)
+        sin = self.sin.to(dtype=q.dtype)
+        q_rot = q * cos + self._rotate_half(q) * sin
+        k_rot = k * cos + self._rotate_half(k) * sin
+        return q_rot, k_rot
+
+
+class RoPESelfAttention(nn.Module):
+    """Multi-head self-attention with rotary position embedding applied to Q and K.
+
+    Mirrors ``nn.MultiheadAttention`` (fused QKV projection + output projection, batch_first)
+    but exposes Q/K so RoPE can be injected before the scaled dot-product.
+    """
+
+    def __init__(
+        self, hidden_dim: int, num_heads: int, attention_dropout: float, rotary: RotaryEmbedding
+    ):
+        super().__init__()
+        torch._assert(hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads")
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.attention_dropout = attention_dropout
+        self.rotary = rotary
+        self.in_proj = nn.Linear(hidden_dim, 3 * hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        nn.init.xavier_uniform_(self.in_proj.weight)
+        nn.init.zeros_(self.in_proj.bias)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, n, c = x.shape
+        # (b, n, 3*c) -> (3, b, num_heads, n, head_dim)
+        qkv = self.in_proj(x).reshape(b, n, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each (b, num_heads, n, head_dim)
+        q, k = self.rotary(q, k)
+        dropout_p = self.attention_dropout if self.training else 0.0
+        out = nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+        out = out.transpose(1, 2).reshape(b, n, c)  # (b, n, c)
+        return self.out_proj(out)
+
+
 class Encoder(nn.Module):
     """Transformer Model Encoder for sequence to sequence translation."""
 
@@ -205,13 +305,32 @@ class Encoder(nn.Module):
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         use_qk_norm: bool = False,
         use_swiglu: bool = False,
+        pos_embedding_type: str = "learned",
     ):
         super().__init__()
         # Note that batch_size is on the first dim because
         # we have batch_first=True in nn.MultiAttention() by default
-        self.pos_embedding = nn.Parameter(
-            torch.empty(1, seq_length, hidden_dim).normal_(std=0.02)
-        )  # from BERT
+        self.rotary: Optional[RotaryEmbedding] = None
+        if pos_embedding_type == "learned":
+            self.pos_embedding = nn.Parameter(
+                torch.empty(1, seq_length, hidden_dim).normal_(std=0.02)
+            )  # from BERT
+        elif pos_embedding_type == "sincos":
+            # Fixed (non-learnable) 2D sine-cosine embedding.
+            self.register_buffer(
+                "pos_embedding",
+                build_2d_sincos_pos_embedding(seq_length, hidden_dim, has_class_token=True),
+                persistent=False,
+            )
+        elif pos_embedding_type == "rope":
+            # Rotary embedding is applied inside attention; no additive positional term is used.
+            self.pos_embedding = None
+            self.rotary = RotaryEmbedding(hidden_dim // num_heads, seq_length)
+        else:
+            raise ValueError(
+                f"Unknown pos_embedding_type={pos_embedding_type!r}; "
+                "expected 'learned', 'sincos' or 'rope'"
+            )
         self.dropout = nn.Dropout(dropout)
         self.patch_drop_rate = patch_drop_rate
         self.patch_drop_mode = patch_drop_mode
@@ -225,6 +344,7 @@ class Encoder(nn.Module):
                 attention_dropout,
                 norm_layer,
                 use_qk_norm,
+                rotary=self.rotary,
             )
         self.layers = nn.Sequential(layers)
         self.ln = norm_layer(hidden_dim)
@@ -233,20 +353,8 @@ class Encoder(nn.Module):
         torch._assert(
             input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}"
         )
-        input = input + self.pos_embedding
-
-        if self.training and self.patch_drop_rate > 0:
-            cls_token, patches = input[:, :1], input[:, 1:]
-            num_keep = max(1, int(patches.shape[1] * (1 - self.patch_drop_rate)))
-            if self.patch_drop_mode == "grid":
-                # deterministic, evenly-spaced patches (like downsampling resolution), same for every sample
-                keep_idx = _grid_keep_indices(n_side, num_keep, patches.device)
-                keep_idx = keep_idx.unsqueeze(0).expand(patches.shape[0], -1)
-            else:
-                keep_idx = torch.rand(patches.shape[:2], device=patches.device).argsort(dim=1)[:, :num_keep]
-            patches = torch.gather(patches, 1, keep_idx.unsqueeze(-1).expand(-1, -1, patches.shape[-1]))
-            input = torch.cat([cls_token, patches], dim=1)
-
+        if self.pos_embedding is not None:
+            input = input + self.pos_embedding
         return self.ln(self.layers(self.dropout(input)))
 
 
@@ -262,15 +370,23 @@ class EncoderBlock(nn.Module):
         attention_dropout: float,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         use_qk_norm: bool = False,
+        rotary: Optional[RotaryEmbedding] = None,
     ):
         super().__init__()
         self.num_heads = num_heads
 
-        # Attention block
+        # Attention block. With a rotary embedding we need access to Q/K, so we swap the stock
+        # nn.MultiheadAttention for a rotary-aware implementation.
         self.ln_1 = norm_layer(hidden_dim)
-        self.self_attention = QKNormAttention(
-            hidden_dim, num_heads, attention_dropout, use_qk_norm=use_qk_norm
-        )
+        self.uses_rope = rotary is not None
+        if self.uses_rope:
+            self.self_attention = RoPESelfAttention(
+                hidden_dim, num_heads, attention_dropout, rotary
+            )
+        else:
+            self.self_attention = QKNormAttention(
+                hidden_dim, num_heads, attention_dropout, use_qk_norm=use_qk_norm
+            )
         self.dropout = nn.Dropout(dropout)
 
         # MLP block
@@ -286,7 +402,10 @@ class EncoderBlock(nn.Module):
             input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}"
         )
         x = self.ln_1(input)
-        x, _ = self.self_attention(x, x, x, need_weights=False)
+        if self.uses_rope:
+            x = self.self_attention(x)
+        else:
+            x, _ = self.self_attention(x, x, x, need_weights=False)
         x = self.dropout(x)
         x = x + input
 

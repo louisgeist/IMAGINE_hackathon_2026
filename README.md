@@ -151,6 +151,34 @@ uv run src/train.py
 ```
 with any Hydra command-line overrides that you need for your experiment.
 
+### Positional Embeddings
+For the original embedding :
+```bash
+uv run src/train.py module.net.pos_embedding_type=learned
+```
+For the sincos embedding : 
+```bash
+uv run src/train.py module.net.pos_embedding_type=sincos
+```
+for ROPE embedding (the most performant) :
+```bash
+uv run src/train.py module.net.pos_embedding_type=rope
+```
+
+### Positional Embeddings
+For the original embedding :
+```bash
+uv run src/train.py module.net.pos_embedding_type=learned
+```
+For the sincos embedding : 
+```bash
+uv run src/train.py module.net.pos_embedding_type=sincos
+```
+for ROPE embedding (the most performant) :
+```bash
+uv run src/train.py module.net.pos_embedding_type=rope
+```
+
 ### ⚠️ IMPORTANT
 > We are also measuring **CPU** and **RAM** consumption, not just GPU consumption. CodeCarbon tries to isolate the consumption of the process that it is tracking, but you will get more reliable measurements if you **don't run experiments in parallel** on the same machine.
 

@@ -1,12 +1,26 @@
 # @package _global_
 
-# runs with execution time profiling
+# Runs the PyTorch profiler with memory profiling enabled.
+# Profiles a short window of training steps and writes a report to
+# ${paths.output_dir}, with the op table sorted by GPU memory usage.
+#
+# For lightweight *time* profiling instead, drop the `profiler:` block below
+# and set one of:
+#   trainer.profiler: "simple"    # mean duration per Lightning hook
+#   trainer.profiler: "advanced"  # cProfile, function-level timings
 
 defaults:
   - default
 
 trainer:
   max_epochs: 1
-  profiler: "simple"
-  # profiler: "advanced"
-  # profiler: "pytorch"
+  limit_train_batches: 10 # a few steps is enough; the profiler only records a window
+  limit_val_batches: 0 # skip validation, focus on the training step
+  profiler:
+    _target_: lightning.pytorch.profilers.PyTorchProfiler
+    dirpath: ${paths.output_dir}
+    filename: "pytorch_memory_profile"
+    sort_by_key: "self_cuda_memory_usage" # rank ops by GPU memory they allocate
+    row_limit: 25
+    export_to_chrome: true # trace.json viewable in chrome://tracing / perfetto (memory timeline)
+    profile_memory: true # forwarded to torch.profiler.profile via **profiler_kwargs
