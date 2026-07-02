@@ -50,6 +50,28 @@ log = RankedLogger(__name__, rank_zero_only=True)
 torch.set_float32_matmul_precision("high")
 
 
+def build_sdpa_context(allow_memory_efficient_backend: bool) -> contextlib.AbstractContextManager:
+    """Return the SDPA backend context used for the whole training run."""
+    if allow_memory_efficient_backend:
+        log.info(
+            "SDPA backends enabled: FLASH_ATTENTION, EFFICIENT_ATTENTION, MATH "
+            "(<allow_memory_efficient_backend=True>)"
+        )
+        return sdpa_kernel(
+            [
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+                SDPBackend.MATH,
+            ]
+        )
+
+    log.info(
+        "SDPA backends enabled: FLASH_ATTENTION only "
+        "(<allow_memory_efficient_backend=False>)"
+    )
+    return sdpa_kernel(SDPBackend.FLASH_ATTENTION)
+
+
 @task_wrapper
 def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Trains the model.
@@ -116,7 +138,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log_hyperparameters(object_dict)
 
     log.info("Starting training!")
-    with tracker, sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
+    sdpa_context = build_sdpa_context(cfg.get("allow_memory_efficient_backend", False))
+    with tracker, sdpa_context:
         # Note: Flash Attention only works with mixed precision, otherwise you will see:
         #   RuntimeError('No available kernel. Aborting execution.')
         # when calling `scaled_dot_product_attention`

@@ -39,5 +39,9 @@ seed: 0
 trainer:
   precision: 16-mixed
 
+# When True, SDPA may fall back to memory-efficient (and math) kernels for masked attention.
+# Required for local/windowed attention; keep False for global Flash-only training.
+allow_memory_efficient_backend: False
+
 module:
   compile: True
