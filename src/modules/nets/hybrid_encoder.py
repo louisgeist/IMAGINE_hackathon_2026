@@ -1,14 +1,15 @@
 from collections import OrderedDict
 from functools import partial
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch.nn as nn
 
+from src.modules.nets.local_attention import LocalEncoderBlock, infer_grid_size
 from src.modules.nets.pom_encoder import PomEncoderBlock
 from src.modules.nets.vision_transformer import EncoderBlock
 
-_VALID_LAYER_TYPES = frozenset({"attention", "pom"})
+_VALID_LAYER_TYPES = frozenset({"attention", "local_attention", "pom"})
 _VALID_LAYER_TYPES_MSG = ", ".join(f"{t!r}" for t in sorted(_VALID_LAYER_TYPES))
 
 
@@ -26,7 +27,7 @@ def _validate_layer_types(layer_types: list[str], num_layers: int) -> list[str]:
 
 
 class HybridEncoder(nn.Module):
-    """Transformer encoder with per-layer attention or PoM blocks."""
+    """Transformer encoder with per-layer attention, local attention, or PoM blocks."""
 
     def __init__(
         self,
@@ -42,10 +43,14 @@ class HybridEncoder(nn.Module):
         n_groups: int,
         pom_degree: int,
         pom_expansion: int,
+        window_size: int = 7,
+        shift_size: int = 0,
+        grid_size: Optional[int] = None,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
     ):
         super().__init__()
         resolved_layer_types = _validate_layer_types(layer_types, num_layers)
+        resolved_grid_size = grid_size if grid_size is not None else infer_grid_size(seq_length)
 
         self.pos_embedding = nn.Parameter(
             torch.empty(1, seq_length, hidden_dim).normal_(std=0.02)
@@ -61,6 +66,18 @@ class HybridEncoder(nn.Module):
                     mlp_dim,
                     dropout,
                     attention_dropout,
+                    norm_layer,
+                )
+            elif layer_type == "local_attention":
+                layers[f"encoder_layer_{i}"] = LocalEncoderBlock(
+                    num_heads,
+                    hidden_dim,
+                    mlp_dim,
+                    dropout,
+                    attention_dropout,
+                    resolved_grid_size,
+                    window_size,
+                    shift_size,
                     norm_layer,
                 )
             elif layer_type == "pom":

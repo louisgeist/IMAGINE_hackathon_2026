@@ -1,5 +1,5 @@
 defaults:
-  - /encoder/pattern: alternating
+  - /encoder/pattern: 3locals_1pom
 
 # @package _global_.module.net.encoder
 _target_: src.modules.nets.hybrid_encoder.HybridEncoder
@@ -17,5 +17,10 @@ attention_dropout: 0.0
 # `pom` layer specific parameters
 n_sel_heads: 6
 n_groups: 1
-pom_degree: 2
+pom_degree: 4
 pom_expansion: 2
+
+# `local_attention` layer specific parameters
+window_size: 7
+shift_size: 0
+# grid_size: 14  # optional, auto-derived from seq_length

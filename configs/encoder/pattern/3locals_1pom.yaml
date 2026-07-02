@@ -1,0 +1,14 @@
+# @package _global_.module.net.encoder
+layer_types:
+  - local_attention
+  - local_attention
+  - local_attention
+  - pom
+  - local_attention
+  - local_attention
+  - local_attention
+  - pom
+  - local_attention
+  - local_attention
+  - local_attention
+  - pom

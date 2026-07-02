@@ -1,0 +1,21 @@
+defaults:
+  - /encoder/pattern: 1global_1pom
+
+# @package _global_.module.net.encoder
+_target_: src.modules.nets.hybrid_encoder.HybridEncoder
+_partial_: true
+
+# Shared parameters
+num_layers: 12
+mlp_dim: 1536
+dropout: 0.0
+
+# `attention` layer specific parameters
+num_heads: 6
+attention_dropout: 0.0
+
+# `pom` layer specific parameters
+n_sel_heads: 6
+n_groups: 1
+pom_degree: 4
+pom_expansion: 2

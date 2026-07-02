@@ -1,0 +1,17 @@
+# @package _global_
+
+# to execute this experiment run:
+# uv run src/train.py experiment=pom_hybrid_local_jpeg
+
+defaults:
+  - /encoder@module.net.encoder: hybrid_global
+  - override /datamodule: jpeg
+
+datamodule:
+  prefetch_factor: 2
+
+# Remember to define experiment_name and tags in all your experiments!
+# First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
+# Second tag options: train, pre-train, post-train, debug, <custom tag>
+experiment_name: "hybrid_global_jpeg"
+tags: ["explore", "train"]
