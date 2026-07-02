@@ -15,7 +15,3 @@ seed: 42
 # Second tag options: train, pre-train, post-train, debug, <custom tag>
 experiment_name: "gated_attention"
 tags: ["explore", "train"]
-
-
-datamodule:
-  num_workers_train: 2
