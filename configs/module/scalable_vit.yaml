@@ -32,7 +32,7 @@ net:
   num_heads: [2, 4, 8, 16]
   mlp_ratios: [4, 4, 4, 4]
   qkv_bias: true
-  depths: [2, 2, 20, 2]
+  depths: [2, 2, 14, 2] # [2,2,20,2] -> too much tokens for an RTX5000 because of the pyramid structure
   sr_ratios: [8, 4, 2, 1]
   wss: [7, 7, 7, 7]
   c_ratios: [1.25, 1.25, 1.25, 1]
