@@ -37,6 +37,59 @@ class ConvStemConfig(NamedTuple):
     activation_layer: Callable[..., nn.Module] = nn.ReLU
 
 
+class GMRConv2d(nn.Module):
+    """Gaussian Mixture Ring convolution (GMR-Conv, arXiv:2504.02819): kernels are weighted
+    sums of concentric Gaussian rings, hence radially symmetric and equivariant to rotations
+    and reflections. Used by Equi-ViT (arXiv:2601.09130) as an equivariant patch stem."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int,
+        padding: int = 0,
+        num_rings: Optional[int] = None,
+        sigma: float = 0.5,
+    ):
+        super().__init__()
+        self.stride = stride
+        self.padding = padding
+        num_rings = num_rings or (kernel_size + 1) // 2
+        coords = torch.arange(kernel_size, dtype=torch.float32) - (kernel_size - 1) / 2
+        radius = (coords[None, :] ** 2 + coords[:, None] ** 2).sqrt()
+        mus = torch.linspace(0, (kernel_size - 1) / 2, num_rings)
+        basis = torch.exp(-((radius[None] - mus[:, None, None]) ** 2) / (2 * sigma**2))
+        basis = basis / basis.sum(dim=(-2, -1), keepdim=True)
+        self.register_buffer("basis", basis)  # (num_rings, k, k)
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels, num_rings))
+        self.bias = nn.Parameter(torch.zeros(out_channels))
+        nn.init.trunc_normal_(self.weight, std=math.sqrt(1 / (in_channels * num_rings)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        kernel = torch.einsum("oir,rhw->oihw", self.weight, self.basis)
+        return nn.functional.conv2d(x, kernel, self.bias, stride=self.stride, padding=self.padding)
+
+
+class MirrorSymConv2d(nn.Module):
+    """Conv2d with kernels symmetric (so equivariant) under horizontal flips."""
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int):
+        super().__init__()
+        self.stride = stride
+        self.kernel_size = kernel_size
+        # store the left half (incl. center column if odd), mirror it to build the full kernel
+        self.weight = nn.Parameter(
+            torch.empty(out_channels, in_channels, kernel_size, (kernel_size + 1) // 2)
+        )
+        self.bias = nn.Parameter(torch.zeros(out_channels))
+        nn.init.trunc_normal_(self.weight, std=math.sqrt(1 / (in_channels * kernel_size**2)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        kernel = torch.cat([self.weight, self.weight[..., : self.kernel_size // 2].flip(-1)], dim=-1)
+        return nn.functional.conv2d(x, kernel, self.bias, stride=self.stride)
+
+
 class VisionTransformer(nn.Module):
     """Vision Transformer as per https://arxiv.org/abs/2010.11929."""
 
@@ -57,6 +110,7 @@ class VisionTransformer(nn.Module):
         patch_drop_rate: float = 0.0,
         patch_drop_mode: str = "random",
         pos_embedding_type: str = "learned",
+        patch_stem: str = "patchify",
     ):
         super().__init__()
         torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
@@ -89,6 +143,16 @@ class VisionTransformer(nn.Module):
                 nn.Conv2d(in_channels=prev_channels, out_channels=hidden_dim, kernel_size=1),
             )
             self.conv_proj: nn.Module = seq_proj
+        elif patch_stem == "gmr":
+            # Equi-ViT's best config: two GMR convs [6, 11]; strides 4x4 = patch_size 16
+            torch._assert(patch_size == 16, "GMR stem strides assume patch_size 16")
+            self.conv_proj = nn.Sequential(
+                GMRConv2d(3, hidden_dim // 4, kernel_size=6, stride=4, padding=1),
+                nn.GELU(),
+                GMRConv2d(hidden_dim // 4, hidden_dim, kernel_size=11, stride=4, padding=4),
+            )
+        elif patch_stem == "mirror":
+            self.conv_proj = MirrorSymConv2d(3, hidden_dim, kernel_size=patch_size, stride=patch_size)
         else:
             self.conv_proj = nn.Conv2d(
                 in_channels=3, out_channels=hidden_dim, kernel_size=patch_size, stride=patch_size
@@ -126,9 +190,7 @@ class VisionTransformer(nn.Module):
             nn.init.trunc_normal_(self.conv_proj.weight, std=math.sqrt(1 / fan_in))
             if self.conv_proj.bias is not None:
                 nn.init.zeros_(self.conv_proj.bias)
-        elif self.conv_proj.conv_last is not None and isinstance(
-            self.conv_proj.conv_last, nn.Conv2d
-        ):
+        elif isinstance(getattr(self.conv_proj, "conv_last", None), nn.Conv2d):
             # Init the last 1x1 conv of the conv stem
             nn.init.normal_(
                 self.conv_proj.conv_last.weight,

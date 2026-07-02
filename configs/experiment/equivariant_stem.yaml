@@ -1,0 +1,18 @@
+# @package _global_
+
+# to execute this experiment run:
+# uv run src/train.py experiment=equivariant_stem
+# for the mirror variant:
+# uv run src/train.py experiment=equivariant_stem module.net.patch_stem=mirror experiment_name=equivariant_stem_mirror
+
+defaults:
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+module:
+  net:
+    patch_stem: "gmr" # "gmr" (rotation+reflection equivariant, Equi-ViT) or "mirror" (horizontal-flip equivariant)
+
+experiment_name: "equivariant_stem_gmr"
+tags: ["ablate", "train"]
