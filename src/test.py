@@ -79,7 +79,9 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         model.load_state_dict(renamed_ckpt)
 
         # Run on test set
-        trainer.test(model=model, datamodule=datamodule)
+        trainer.test(
+            model=model, datamodule=datamodule
+        )
         metric_dict = trainer.callback_metrics
 
         # Save metrics
