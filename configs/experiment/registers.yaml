@@ -1,0 +1,19 @@
+# @package _global_
+
+# to execute this experiment run:
+# uv run src/train.py experiment=example
+
+defaults:
+  - override /trainer: imagenet_vit_s_16
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+module:
+  net:
+    num_registers: 3
+
+# Remember to define experiment_name and tags in all your experiments!
+# First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
+# Second tag options: train, pre-train, post-train, debug, <custom tag>
+experiment_name: "vit_with_registers"
+tags: ["explore", "train"]

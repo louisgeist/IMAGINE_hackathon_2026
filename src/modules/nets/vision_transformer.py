@@ -40,7 +40,8 @@ class ConvStemConfig(NamedTuple):
 class GMRConv2d(nn.Module):
     """Gaussian Mixture Ring convolution (GMR-Conv, arXiv:2504.02819): kernels are weighted
     sums of concentric Gaussian rings, hence radially symmetric and equivariant to rotations
-    and reflections. Used by Equi-ViT (arXiv:2601.09130) as an equivariant patch stem."""
+    and reflections. Used by Equi-ViT (arXiv:2601.09130) as an equivariant patch stem.
+    """
 
     def __init__(
         self,
@@ -68,13 +69,17 @@ class GMRConv2d(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         kernel = torch.einsum("oir,rhw->oihw", self.weight, self.basis)
-        return nn.functional.conv2d(x, kernel, self.bias, stride=self.stride, padding=self.padding)
+        return nn.functional.conv2d(
+            x, kernel, self.bias, stride=self.stride, padding=self.padding
+        )
 
 
 class MirrorSymConv2d(nn.Module):
     """Conv2d with kernels symmetric (so equivariant) under horizontal flips."""
 
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int):
+    def __init__(
+        self, in_channels: int, out_channels: int, kernel_size: int, stride: int
+    ):
         super().__init__()
         self.stride = stride
         self.kernel_size = kernel_size
@@ -83,10 +88,14 @@ class MirrorSymConv2d(nn.Module):
             torch.empty(out_channels, in_channels, kernel_size, (kernel_size + 1) // 2)
         )
         self.bias = nn.Parameter(torch.zeros(out_channels))
-        nn.init.trunc_normal_(self.weight, std=math.sqrt(1 / (in_channels * kernel_size**2)))
+        nn.init.trunc_normal_(
+            self.weight, std=math.sqrt(1 / (in_channels * kernel_size**2))
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        kernel = torch.cat([self.weight, self.weight[..., : self.kernel_size // 2].flip(-1)], dim=-1)
+        kernel = torch.cat(
+            [self.weight, self.weight[..., : self.kernel_size // 2].flip(-1)], dim=-1
+        )
         return nn.functional.conv2d(x, kernel, self.bias, stride=self.stride)
 
 
@@ -111,9 +120,12 @@ class VisionTransformer(nn.Module):
         patch_drop_mode: str = "random",
         pos_embedding_type: str = "learned",
         patch_stem: str = "patchify",
+        num_registers=0,
     ):
         super().__init__()
-        torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
+        torch._assert(
+            image_size % patch_size == 0, "Input shape indivisible by patch size!"
+        )
         self.image_size = image_size
         self.patch_size = patch_size
         self.hidden_dim = hidden_dim
@@ -121,7 +133,7 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.representation_size = representation_size
         self.norm_layer = norm_layer
-        self.num_registers = num_registers
+        self.num_registers = 0
 
         if conv_stem_configs is not None:
             # As per https://arxiv.org/abs/2106.14881
@@ -142,7 +154,9 @@ class VisionTransformer(nn.Module):
                 prev_channels = conv_stem_layer_config.out_channels
             seq_proj.add_module(
                 "conv_last",
-                nn.Conv2d(in_channels=prev_channels, out_channels=hidden_dim, kernel_size=1),
+                nn.Conv2d(
+                    in_channels=prev_channels, out_channels=hidden_dim, kernel_size=1
+                ),
             )
             self.conv_proj: nn.Module = seq_proj
         elif patch_stem == "gmr":
@@ -151,13 +165,20 @@ class VisionTransformer(nn.Module):
             self.conv_proj = nn.Sequential(
                 GMRConv2d(3, hidden_dim // 4, kernel_size=6, stride=4, padding=1),
                 nn.GELU(),
-                GMRConv2d(hidden_dim // 4, hidden_dim, kernel_size=11, stride=4, padding=4),
+                GMRConv2d(
+                    hidden_dim // 4, hidden_dim, kernel_size=11, stride=4, padding=4
+                ),
             )
         elif patch_stem == "mirror":
-            self.conv_proj = MirrorSymConv2d(3, hidden_dim, kernel_size=patch_size, stride=patch_size)
+            self.conv_proj = MirrorSymConv2d(
+                3, hidden_dim, kernel_size=patch_size, stride=patch_size
+            )
         else:
             self.conv_proj = nn.Conv2d(
-                in_channels=3, out_channels=hidden_dim, kernel_size=patch_size, stride=patch_size
+                in_channels=3,
+                out_channels=hidden_dim,
+                kernel_size=patch_size,
+                stride=patch_size,
             )
 
         seq_length = (image_size // patch_size) ** 2
@@ -165,7 +186,7 @@ class VisionTransformer(nn.Module):
         # Add a class token
         self.class_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
         seq_length += 1
-
+        
 
         self.encoder = encoder(
             seq_length=seq_length,
@@ -175,9 +196,13 @@ class VisionTransformer(nn.Module):
 
         heads_layers: OrderedDict[str, nn.Module] = OrderedDict()
         if representation_size is None:
-            heads_layers["head"] = nn.Linear(hidden_dim * (self.num_registers + 1), num_classes)
+            heads_layers["head"] = nn.Linear(
+                hidden_dim * (self.num_registers + 1), num_classes
+            )
         else:
-            heads_layers["pre_logits"] = nn.Linear(hidden_dim * (self.num_registers + 1), representation_size)
+            heads_layers["pre_logits"] = nn.Linear(
+                hidden_dim * (self.num_registers + 1), representation_size
+            )
             heads_layers["act"] = nn.Tanh()
             heads_layers["head"] = nn.Linear(representation_size, num_classes)
 
@@ -203,9 +228,13 @@ class VisionTransformer(nn.Module):
             if self.conv_proj.conv_last.bias is not None:
                 nn.init.zeros_(self.conv_proj.conv_last.bias)
 
-        if hasattr(self.heads, "pre_logits") and isinstance(self.heads.pre_logits, nn.Linear):
+        if hasattr(self.heads, "pre_logits") and isinstance(
+            self.heads.pre_logits, nn.Linear
+        ):
             fan_in = self.heads.pre_logits.in_features
-            nn.init.trunc_normal_(self.heads.pre_logits.weight, std=math.sqrt(1 / fan_in))
+            nn.init.trunc_normal_(
+                self.heads.pre_logits.weight, std=math.sqrt(1 / fan_in)
+            )
             nn.init.zeros_(self.heads.pre_logits.bias)
 
         if isinstance(self.heads.head, nn.Linear):
@@ -216,10 +245,12 @@ class VisionTransformer(nn.Module):
         n, c, h, w = x.shape
         p = self.patch_size
         torch._assert(
-            h == self.image_size, f"Wrong image height! Expected {self.image_size} but got {h}!"
+            h == self.image_size,
+            f"Wrong image height! Expected {self.image_size} but got {h}!",
         )
         torch._assert(
-            w == self.image_size, f"Wrong image width! Expected {self.image_size} but got {w}!"
+            w == self.image_size,
+            f"Wrong image width! Expected {self.image_size} but got {w}!",
         )
         n_h = h // p
         n_w = w // p
@@ -244,14 +275,16 @@ class VisionTransformer(nn.Module):
 
         batch_class_token = self.class_token.expand(n, -1, -1)
         if self.num_registers > 0:
-            batch_registers = self.registers.expand(n, self.num_registers, self.hidden_dim)
+            batch_registers = self.registers.expand(
+                n, self.num_registers, self.hidden_dim
+            )
             x = torch.cat([batch_class_token, batch_registers, x], dim=1)
         else:
             x = torch.cat([batch_class_token, x], dim=1)
 
         x = self.encoder(x, n_side=self.image_size // self.patch_size)
 
-        x = x[:, :self.num_registers + 1].flatten(1)
+        x = x[:, : self.num_registers + 1].flatten(1)
 
         x = self.heads(x)
 
@@ -259,7 +292,10 @@ class VisionTransformer(nn.Module):
 
 
 def build_2d_sincos_pos_embedding(
-    seq_length: int, hidden_dim: int, has_class_token: bool = True, temperature: float = 10000.0
+    seq_length: int,
+    hidden_dim: int,
+    has_class_token: bool = True,
+    temperature: float = 10000.0,
 ) -> torch.Tensor:
     """Fixed 2D sine-cosine positional embedding (as in MAE / DeiT-III).
 
@@ -268,14 +304,20 @@ def build_2d_sincos_pos_embedding(
     """
     n_patches = seq_length - 1 if has_class_token else seq_length
     grid = int(math.isqrt(n_patches))
-    torch._assert(grid * grid == n_patches, "sincos pos-embed requires a square patch grid")
-    torch._assert(hidden_dim % 4 == 0, "hidden_dim must be divisible by 4 for 2D sincos")
+    torch._assert(
+        grid * grid == n_patches, "sincos pos-embed requires a square patch grid"
+    )
+    torch._assert(
+        hidden_dim % 4 == 0, "hidden_dim must be divisible by 4 for 2D sincos"
+    )
     gy, gx = torch.meshgrid(torch.arange(grid), torch.arange(grid), indexing="ij")
     dim4 = hidden_dim // 4
     omega = 1.0 / (temperature ** (torch.arange(dim4) / dim4))
     ox = gx.flatten()[:, None] * omega[None, :]
     oy = gy.flatten()[:, None] * omega[None, :]
-    pe = torch.cat([ox.sin(), ox.cos(), oy.sin(), oy.cos()], dim=1)  # (n_patches, hidden_dim)
+    pe = torch.cat(
+        [ox.sin(), ox.cos(), oy.sin(), oy.cos()], dim=1
+    )  # (n_patches, hidden_dim)
     if has_class_token:
         pe = torch.cat([torch.zeros(1, hidden_dim), pe], dim=0)
     return pe.unsqueeze(0)  # (1, seq_length, hidden_dim)
@@ -297,7 +339,9 @@ class RotaryEmbedding(nn.Module):
     def __init__(self, head_dim: int, seq_length: int, base: float = 10000.0):
         super().__init__()
         torch._assert(head_dim % 2 == 0, "RoPE requires an even head dimension")
-        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))  # (head_dim/2,)
+        inv_freq = 1.0 / (
+            base ** (torch.arange(0, head_dim, 2).float() / head_dim)
+        )  # (head_dim/2,)
         positions = torch.arange(seq_length).float()  # (seq_length,)
         freqs = torch.outer(positions, inv_freq)  # (seq_length, head_dim/2)
         emb = torch.cat([freqs, freqs], dim=-1)  # (seq_length, head_dim)
@@ -310,7 +354,9 @@ class RotaryEmbedding(nn.Module):
         x1, x2 = x.chunk(2, dim=-1)
         return torch.cat([-x2, x1], dim=-1)
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, q: torch.Tensor, k: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Cast tables to the (possibly fp16 under AMP) dtype of q/k to keep SDPA inputs consistent.
         cos = self.cos.to(dtype=q.dtype)
         sin = self.sin.to(dtype=q.dtype)
@@ -327,10 +373,16 @@ class RoPESelfAttention(nn.Module):
     """
 
     def __init__(
-        self, hidden_dim: int, num_heads: int, attention_dropout: float, rotary: RotaryEmbedding
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        attention_dropout: float,
+        rotary: RotaryEmbedding,
     ):
         super().__init__()
-        torch._assert(hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads")
+        torch._assert(
+            hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
+        )
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
         self.attention_dropout = attention_dropout
@@ -348,7 +400,11 @@ class RoPESelfAttention(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, n, c = x.shape
         # (b, n, 3*c) -> (3, b, num_heads, n, head_dim)
-        qkv = self.in_proj(x).reshape(b, n, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.in_proj(x)
+            .reshape(b, n, 3, self.num_heads, self.head_dim)
+            .permute(2, 0, 3, 1, 4)
+        )
         q, k, v = qkv[0], qkv[1], qkv[2]  # each (b, num_heads, n, head_dim)
         q, k = self.rotary(q, k)
         dropout_p = self.attention_dropout if self.training else 0.0
@@ -386,7 +442,9 @@ class Encoder(nn.Module):
             # Fixed (non-learnable) 2D sine-cosine embedding.
             self.register_buffer(
                 "pos_embedding",
-                build_2d_sincos_pos_embedding(seq_length, hidden_dim, has_class_token=True),
+                build_2d_sincos_pos_embedding(
+                    seq_length, hidden_dim, has_class_token=True
+                ),
                 persistent=False,
             )
         elif pos_embedding_type == "rope":
@@ -418,7 +476,8 @@ class Encoder(nn.Module):
 
     def forward(self, input: torch.Tensor, n_side: Optional[int] = None):
         torch._assert(
-            input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}"
+            input.dim() == 3,
+            f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}",
         )
         if self.pos_embedding is not None:
             input = input + self.pos_embedding
@@ -445,8 +504,10 @@ class EncoderBlock(nn.Module):
         # Attention block. With a rotary embedding we need access to Q/K, so we swap the stock
         # nn.MultiheadAttention for a rotary-aware implementation.
         self.ln_1 = norm_layer(hidden_dim)
-        self.uses_rope = rotary is not None
-        if self.uses_rope:
+        if rotary is not None:
+            torch._assert(
+                not use_qk_norm, "RoPE attention does not support QK-Norm yet"
+            )
             self.self_attention = RoPESelfAttention(
                 hidden_dim, num_heads, attention_dropout, rotary
             )
@@ -466,7 +527,8 @@ class EncoderBlock(nn.Module):
 
     def forward(self, input: torch.Tensor):
         torch._assert(
-            input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}"
+            input.dim() == 3,
+            f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}",
         )
         x = self.ln_1(input)
         if self.uses_rope:
@@ -532,7 +594,11 @@ class MLPBlock(MLP):
 
     def __init__(self, in_dim: int, mlp_dim: int, dropout: float):
         super().__init__(
-            in_dim, [mlp_dim, in_dim], activation_layer=nn.GELU, inplace=None, dropout=dropout
+            in_dim,
+            [mlp_dim, in_dim],
+            activation_layer=nn.GELU,
+            inplace=None,
+            dropout=dropout,
         )
 
         for m in self.modules():
@@ -623,10 +689,16 @@ class ConvNormActivation(torch.nn.Sequential):
             if isinstance(kernel_size, int) and isinstance(dilation, int):
                 padding = (kernel_size - 1) // 2 * dilation
             else:
-                _conv_dim = len(kernel_size) if isinstance(kernel_size, Sequence) else len(dilation)
+                _conv_dim = (
+                    len(kernel_size)
+                    if isinstance(kernel_size, Sequence)
+                    else len(dilation)
+                )
                 kernel_size = _make_ntuple(kernel_size, _conv_dim)
                 dilation = _make_ntuple(dilation, _conv_dim)
-                padding = tuple((kernel_size[i] - 1) // 2 * dilation[i] for i in range(_conv_dim))
+                padding = tuple(
+                    (kernel_size[i] - 1) // 2 * dilation[i] for i in range(_conv_dim)
+                )
         if bias is None:
             bias = norm_layer is None
 
