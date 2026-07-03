@@ -116,9 +116,11 @@ class ImageNetDataModule(LightningDataModule):
         :param mixup_alpha: The alpha value for MixUp augmentation. Defaults to `0.0` (no MixUp).
         :param random_erase_prob: The probability of applying random erasing during training. Defaults to `0.0`.
         :param batch_size: The batch size. Defaults to `64`.
-        :param num_workers: The number of workers. Defaults to `0`.
+        :param num_workers_train: The number of workers for the train dataloader. Defaults to `4`.
+        :param num_workers_val: The number of workers for the val/test dataloaders. Defaults to `4`.
         :param prefetch_factor: The number of batches to prefetch. Defaults to `2`.
         :param pin_memory: Whether to pin memory. Defaults to `False`.
+        :param persistent_workers: Whether to keep worker processes alive between epochs. Defaults to `False`.
         :param uint8_pipeline: If `True`, images are handed to the model as uint8 tensors and
             normalization/CutMix/MixUp are applied on GPU inside `ImageNetModule`. If `False`,
             the legacy CPU-side pipeline is used instead: images are normalized to floats and
@@ -131,27 +133,19 @@ class ImageNetDataModule(LightningDataModule):
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
 
-        # data transformations
-        self.auto_augment_policy = auto_augment_policy
-        self.interpolation = interpolation
-
-        self.train_crop_size = train_crop_size
-        self.eval_resize_size = eval_resize_size
-        self.eval_crop_size = eval_crop_size
-
-        self.hflip_prob = hflip_prob
-        self.augmix_severity = augmix_severity
-
-        self.ra_magnitude = ra_magnitude
-        self.random_erase_prob = random_erase_prob
-
-        self.uint8_pipeline = uint8_pipeline
         self.imagenet_mean = (0.485, 0.456, 0.406)
         self.imagenet_std = (0.229, 0.224, 0.225)
 
         if uint8_pipeline:
             self.collate_fn = default_collate
         else:
+            mixup_cutmix = self._get_mixup_cutmix(
+                mixup_alpha=mixup_alpha, cutmix_alpha=cutmix_alpha
+            )
+            if mixup_cutmix is not None:
+                self.collate_fn = lambda batch: mixup_cutmix(*default_collate(batch))
+            else:
+                self.collate_fn = default_collate
             mixup_cutmix = self._get_mixup_cutmix(
                 mixup_alpha=mixup_alpha, cutmix_alpha=cutmix_alpha
             )
@@ -167,59 +161,64 @@ class ImageNetDataModule(LightningDataModule):
         self.batch_size_per_device = batch_size
 
     def _get_train_augmentations(self) -> Callable:
-        interpolation_mode = T.InterpolationMode(self.interpolation)
+        interpolation_mode = T.InterpolationMode(self.hparams.interpolation)
         train_transforms = []
         train_transforms.append(
-            T.RandomResizedCrop(self.train_crop_size, interpolation=interpolation_mode)
+            T.RandomResizedCrop(
+                self.hparams.train_crop_size, interpolation=interpolation_mode
+            )
         )
-        if self.hflip_prob > 0:
-            train_transforms.append(T.RandomHorizontalFlip(self.hflip_prob))
+        if self.hparams.hflip_prob > 0:
+            train_transforms.append(T.RandomHorizontalFlip(self.hparams.hflip_prob))
 
-        if self.auto_augment_policy is not None:
-            if self.auto_augment_policy == "ra":
+        if self.hparams.auto_augment_policy is not None:
+            if self.hparams.auto_augment_policy == "ra":
                 train_transforms.append(
                     T.RandAugment(
                         interpolation=interpolation_mode,
-                        magnitude=self.ra_magnitude,
+                        magnitude=self.hparams.ra_magnitude,
                     )
                 )
-            elif self.auto_augment_policy == "ta_wide":
+            elif self.hparams.auto_augment_policy == "ta_wide":
                 train_transforms.append(
                     T.TrivialAugmentWide(interpolation=interpolation_mode)
                 )
-            elif self.auto_augment_policy == "augmix":
+            elif self.hparams.auto_augment_policy == "augmix":
                 train_transforms.append(
                     T.AugMix(
-                        interpolation=interpolation_mode, severity=self.augmix_severity
+                        interpolation=interpolation_mode,
+                        severity=self.hparams.augmix_severity,
                     )
                 )
             else:
-                aa_policy = T.AutoAugmentPolicy(self.auto_augment_policy)
+                aa_policy = T.AutoAugmentPolicy(self.hparams.auto_augment_policy)
                 train_transforms.append(
                     T.AutoAugment(policy=aa_policy, interpolation=interpolation_mode)
                 )
 
         train_transforms.append(T.PILToTensor())
-        if self.uint8_pipeline:
+        if self.hparams.uint8_pipeline:
             train_transforms.append(T.ToDtype(torch.uint8, scale=True))
         else:
             train_transforms.append(T.ToDtype(torch.float, scale=True))
             train_transforms.append(
                 T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std)
             )
-            if self.random_erase_prob > 0:
-                train_transforms.append(T.RandomErasing(p=self.random_erase_prob))
+            if self.hparams.random_erase_prob > 0:
+                train_transforms.append(
+                    T.RandomErasing(p=self.hparams.random_erase_prob)
+                )
         train_transforms.append(T.ToPureTensor())
         return T.Compose(train_transforms)
 
     def _get_eval_augmentations(self) -> Callable:
-        interpolation_mode = T.InterpolationMode(self.interpolation)
+        interpolation_mode = T.InterpolationMode(self.hparams.interpolation)
         eval_transforms = [
-            T.Resize(self.eval_resize_size, interpolation=interpolation_mode),
-            T.CenterCrop(self.eval_crop_size),
+            T.Resize(self.hparams.eval_resize_size, interpolation=interpolation_mode),
+            T.CenterCrop(self.hparams.eval_crop_size),
             T.PILToTensor(),
         ]
-        if self.uint8_pipeline:
+        if self.hparams.uint8_pipeline:
             eval_transforms.append(T.ToDtype(torch.uint8, scale=True))
         else:
             eval_transforms.append(T.ToDtype(torch.float, scale=True))
