@@ -16,6 +16,7 @@ module:
   patch_drop_update_every: 3 # epochs between patch drop rate updates (avoids a torch.compile recompile every epoch)
   compile_dynamic: null # set to true to let torch.compile trace the token dimension as dynamic instead
   net:
+    _target_: src.modules.nets.patch_drop_vit.PatchDropVisionTransformer
     patch_drop_mode: "random" # "random" or "grid" (nested grids of patches, like increasing resolution little by little.)
 
 experiment_name: "patch_drop"
