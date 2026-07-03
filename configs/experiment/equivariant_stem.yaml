@@ -14,5 +14,8 @@ module:
   net:
     patch_stem: "gmr" # "gmr" (rotation+reflection equivariant, Equi-ViT) or "mirror" (horizontal-flip equivariant)
 
+datamodule:
+  hflip_prob: 0
+
 experiment_name: "equivariant_stem_gmr"
 tags: ["ablate", "train"]
