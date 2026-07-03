@@ -29,6 +29,7 @@ torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 codecarbon = { git = "https://github.com/Archiel19/codecarbon.git", branch = "wandb" }
 muon-optimizer = { git = "https://github.com/KellerJordan/Muon" }
+pom = { git = "https://github.com/davidpicard/pom.git" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
