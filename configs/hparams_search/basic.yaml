@@ -8,7 +8,7 @@ hydra:
 
   sweeper:
     params:
-      module.optimizer.lr: range(0.007, 0.01, step=0.002)
-      datamodule.batch_size: choice(512)
+      module.optimizer.lr: range(0.01, 0.02, 0.005)
+      datamodule.batch_size: choice(64, 128, 256)
 
 tags: ["hyperparam", "train"]
