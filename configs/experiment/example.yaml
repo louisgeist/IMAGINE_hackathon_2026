@@ -11,12 +11,8 @@ defaults:
 # this allows you to overwrite only specified parameters
 
 seed: 42
-
-trainer:
-  precision: 16-mixed
-
-module:
-  compile: false
+datamodule:
+  uint8_pipeline: true
 
 # Remember to define experiment_name and tags in all your experiments!
 # First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>

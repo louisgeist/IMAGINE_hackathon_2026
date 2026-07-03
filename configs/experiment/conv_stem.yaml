@@ -1,0 +1,42 @@
+# @package _global_
+
+# to execute this experiment run:
+# uv run src/train.py experiment=conv_stem
+
+defaults:
+  - override /trainer: imagenet_vit_s_16
+
+# Replaces the patchify stem (single strided conv) with a stack of small-stride
+# convolutions, as per https://arxiv.org/abs/2106.14881 ("Early Convolutions
+# Help Transformers See Better"), using the widths from the paper
+# (channels -> 48 -> 96 -> 192 -> 384). Cumulative stride is 16, matching patch_size.
+# This stem costs ~1 transformer encoder layer worth of FLOPs, so num_layers is
+# reduced from 12 to 11 to keep the overall compute budget roughly unchanged. No official code from the paper :(
+
+module:
+  net:
+    num_layers: 11
+    conv_stem_configs:
+      - _target_: src.modules.nets.vision_transformer.ConvStemConfig
+        out_channels: 48
+        kernel_size: 3
+        stride: 2
+      - _target_: src.modules.nets.vision_transformer.ConvStemConfig
+        out_channels: 96
+        kernel_size: 3
+        stride: 2
+      - _target_: src.modules.nets.vision_transformer.ConvStemConfig
+        out_channels: 192
+        kernel_size: 3
+        stride: 2
+      - _target_: src.modules.nets.vision_transformer.ConvStemConfig
+        out_channels: 384
+        kernel_size: 3
+        stride: 2
+
+# Remember to define experiment_name and tags in all your experiments!
+# First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
+# Second tag options: train, pre-train, post-train, debug, <custom tag>
+experiment_name: "vit_with_convstem_w_similar_lfops"
+tags: ["explore", "train"]
+

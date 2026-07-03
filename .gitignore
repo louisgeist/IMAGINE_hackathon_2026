@@ -5,8 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
-wandb/
-eval_output/
+
 # Virtual environments
 .venv
 
@@ -31,3 +30,4 @@ eval_output/
 !predictions/.gitkeep
 
 delete*
+eval_output/

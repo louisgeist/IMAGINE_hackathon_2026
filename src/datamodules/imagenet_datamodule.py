@@ -93,6 +93,7 @@ class ImageNetDataModule(LightningDataModule):
         batch_size: int = 64,
         num_workers_train: int = 4,
         num_workers_val: int = 4,
+        num_workers_test: int = 4,
         prefetch_factor: int = 2,
         pin_memory: bool = False,
         persistent_workers: bool = False,

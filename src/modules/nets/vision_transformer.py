@@ -121,6 +121,8 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.representation_size = representation_size
         self.norm_layer = norm_layer
+        self.num_registers = num_registers
+
         if conv_stem_configs is not None:
             # As per https://arxiv.org/abs/2106.14881
             seq_proj = nn.Sequential()
@@ -164,6 +166,7 @@ class VisionTransformer(nn.Module):
         self.class_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
         seq_length += 1
 
+
         self.encoder = encoder(
             seq_length=seq_length,
             hidden_dim=hidden_dim,
@@ -172,9 +175,9 @@ class VisionTransformer(nn.Module):
 
         heads_layers: OrderedDict[str, nn.Module] = OrderedDict()
         if representation_size is None:
-            heads_layers["head"] = nn.Linear(hidden_dim, num_classes)
+            heads_layers["head"] = nn.Linear(hidden_dim * (self.num_registers + 1), num_classes)
         else:
-            heads_layers["pre_logits"] = nn.Linear(hidden_dim, representation_size)
+            heads_layers["pre_logits"] = nn.Linear(hidden_dim * (self.num_registers + 1), representation_size)
             heads_layers["act"] = nn.Tanh()
             heads_layers["head"] = nn.Linear(representation_size, num_classes)
 
@@ -239,14 +242,16 @@ class VisionTransformer(nn.Module):
         x = self._process_input(x)
         n = x.shape[0]
 
-        # Expand the class token to the full batch
         batch_class_token = self.class_token.expand(n, -1, -1)
-        x = torch.cat([batch_class_token, x], dim=1)
+        if self.num_registers > 0:
+            batch_registers = self.registers.expand(n, self.num_registers, self.hidden_dim)
+            x = torch.cat([batch_class_token, batch_registers, x], dim=1)
+        else:
+            x = torch.cat([batch_class_token, x], dim=1)
 
         x = self.encoder(x, n_side=self.image_size // self.patch_size)
 
-        # Classifier "token" as used by standard language architectures
-        x = x[:, 0]
+        x = x[:, :self.num_registers + 1].flatten(1)
 
         x = self.heads(x)
 
