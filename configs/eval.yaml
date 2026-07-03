@@ -30,6 +30,6 @@ module:
 
 # TODO Complete with the paths to the checkpoints you want to test
 checkpoints: [
-  # "equivariant_compile/2026-07-02/23-57-20/checkpoints/last.ckpt",
-  "semantic_label_smoothing_range/2026-07-02/08-19-52/checkpoints/last.ckpt",
+  "equivariant_compile/2026-07-02/23-57-20/checkpoints/last.ckpt",
+  # "semantic_label_smoothing_range/2026-07-02/08-19-52/checkpoints/last.ckpt",
 ]
