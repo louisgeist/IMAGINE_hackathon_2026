@@ -18,7 +18,7 @@ defaults:
 
 # TODO Write your team name
 team_name: "TODO"
-tags: ["baseline", "evaluate"]
+tags: ["final", "evaluate"]
 
 seed: 0
 
