@@ -17,6 +17,7 @@ dependencies = [
     "rich>=15.0.0",
     "rootutils>=1.0.7",
     "scipy>=1.17.1",
+    "timm>=1.0.0",
     "torch==2.10.0",
     "torchvision==0.25.0",
     "wandb>=0.26.1",

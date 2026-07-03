@@ -18,7 +18,6 @@ from src.utils import (
     log_hyperparameters,
     task_wrapper,
 )
-from src.utils.utils import rsync_upload
 
 log = RankedLogger(__name__, rank_zero_only=True)
 

@@ -14,12 +14,11 @@ defaults:
   - experiment: null
   - hparams_search: null
   - debug: null
+  - override /module: metaformer_hybrid_s12
 
-# TODO Write your team name
-team_name: ???
+team_name: arch
 tags: ["final", "evaluate"]
 
-# seed for random number generators in pytorch, numpy and python.random
 seed: 0
 
 trainer:
@@ -28,8 +27,6 @@ trainer:
 module:
   compile: false
 
-# TODO Complete with the paths to the checkpoints you want to test
 checkpoints: [
-  "equivariant_compile/2026-07-02/23-57-20/checkpoints/last.ckpt",
-  # "semantic_label_smoothing_range/2026-07-02/08-19-52/checkpoints/last.ckpt",
+  "metaformer_hybrid_s12/2026-07-02/14-24-40/checkpoints/last.ckpt",
 ]
