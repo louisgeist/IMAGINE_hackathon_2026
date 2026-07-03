@@ -16,6 +16,8 @@ seed: 0
 module:
   compile: false
 
+allow_memory_efficient_backend: true
+
 # Remember to define experiment_name and tags in all your experiments!
 # First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
 # Second tag options: train, pre-train, post-train, debug, <custom tag>
