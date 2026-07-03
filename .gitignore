@@ -23,6 +23,7 @@ predictions/*
 eval_output/
 wandb/
 outputs
+eval_output/
 
 !data/.gitkeep
 !logs/.gitkeep
