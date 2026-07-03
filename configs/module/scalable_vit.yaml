@@ -32,9 +32,9 @@ net:
   num_heads: [2, 4, 8, 16]
   mlp_ratios: [4, 4, 4, 4]
   qkv_bias: true
-  depths: [2, 2, 14, 2]
+  depths: [2, 2, 20, 2]
   sr_ratios: [8, 4, 2, 1]
   wss: [7, 7, 7, 7]
   c_ratios: [1.25, 1.25, 1.25, 1]
   drop_path_rate: 0.2
-  plain_head: true # plain Linear head (~0.5M params) instead of the 4096-wide MLP head (~6.2M)
+  plain_head: false # plain Linear head (~0.5M params) instead of the 4096-wide MLP head (~6.2M)
