@@ -83,12 +83,6 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
         # Save metrics
         rel_ckpt_dir = rel_ckpt_path.split(os.sep)[:-2]  # Strip '/checkpoints/<checkpoint name>'
-        #prediction_subdir = os.path.join(cfg.paths.prediction_dir, "valid", *rel_ckpt_dir)
-        #os.makedirs(prediction_subdir, exist_ok=True)
-        #prediction_path = os.path.join(prediction_subdir, "metrics.txt")
-        #with open(prediction_path, 'w') as f:
-        #    for k, v in metric_dict.items():
-        #        f.write(f"{k}: {v}\n")
 
         # Print time, energy and emissions
         experiment_name = rel_ckpt_path.split(os.sep)[0]
@@ -105,11 +99,6 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             print(f"Emissions: {emissions_kgco2e * 1e3:.2f} gCO2eq")
         else:
             print(f"Couldn't find {emissions_path}!")
-
-        # Send to evaluation server
-        #dest_dir = f"172.22.11.44::eval_server/valid/{cfg.team_name}/{experiment_name}/"
-        #subprocess.call(["rsync", "-avz", "--mkpath", prediction_path, f"{dest_dir}metrics.txt"])
-        #subprocess.call(["rsync", "-avz", "--mkpath", emissions_path, f"{dest_dir}emissions.csv"])
 
     metric_dict = trainer.callback_metrics
 

@@ -96,7 +96,7 @@ class ImageNetDataModule(LightningDataModule):
         prefetch_factor: int = 2,
         pin_memory: bool = False,
         persistent_workers: bool = False,
-        uint8_pipeline: bool = True,
+        uint8_pipeline: bool = True
     ) -> None:
         """Initialize an `ImageNetDataModule`.
 
