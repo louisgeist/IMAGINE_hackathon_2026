@@ -35,6 +35,32 @@ from torch import nn
 _ROTATIONS = 4  # |C4|: rotations by 0, 90, 180, 270 degrees.
 
 
+def _build_rot_index(kernel_size: int) -> torch.Tensor:
+    """Precompute flattened spatial indices realising ``rot90`` for each rotation.
+
+    Returns a ``(4, kernel_size * kernel_size)`` integer tensor such that, for a
+    weight flattened over its trailing spatial dims, ``w_flat[..., idx[r]]``
+    equals ``torch.rot90(w, k=r, dims=(-2, -1))`` (re-flattened). Using a static
+    ``index_select`` instead of ``torch.rot90`` keeps the weight transform a
+    plain gather that ``torch.compile`` can trace and fuse cleanly.
+    """
+    grid = torch.arange(kernel_size * kernel_size).reshape(kernel_size, kernel_size)
+    return torch.stack(
+        [torch.rot90(grid, k=r, dims=(0, 1)).reshape(-1) for r in range(_ROTATIONS)],
+        dim=0,
+    )
+
+
+def _build_roll_index() -> torch.Tensor:
+    """Precompute orientation-axis gather indices realising ``torch.roll``.
+
+    Returns a ``(4, 4)`` integer tensor where ``x[..., idx[r], ...]`` reproduces
+    ``torch.roll(x, shifts=r, dims=<orientation>)`` (``out[j] = in[(j - r) % 4]``).
+    """
+    base = torch.arange(_ROTATIONS)
+    return torch.stack([(base - r) % _ROTATIONS for r in range(_ROTATIONS)], dim=0)
+
+
 class P4ConvZ2(nn.Module):
     """Lifting convolution mapping a ``Z^2`` signal to a ``p4`` signal.
 
@@ -64,14 +90,22 @@ class P4ConvZ2(nn.Module):
         nn.init.kaiming_uniform_(self.weight, a=0, mode="fan_in", nonlinearity="relu")
         self.bias = nn.Parameter(torch.zeros(out_channels)) if bias else None
 
+        self.register_buffer("rot_index", _build_rot_index(kernel_size), persistent=False)
+
     def _rotated_weight(self) -> torch.Tensor:
-        # Stack 4 spatial rotations of the base filter along a new axis.
-        rotations = [
-            torch.rot90(self.weight, k=r, dims=(-2, -1)) for r in range(_ROTATIONS)
-        ]
-        # (4, out, in, k, k) -> (4 * out, in, k, k)
-        weight = torch.stack(rotations, dim=0)
-        return weight.reshape(_ROTATIONS * self.out_channels, self.in_channels, *weight.shape[-2:])
+        # Stack 4 spatial rotations of the base filter along a new axis, realised
+        # as a static gather so the transform stays torch.compile-friendly.
+        w_flat = self.weight.reshape(self.out_channels, self.in_channels, -1)
+        # (out, in, kk) gathered by (4, kk) -> (out, in, 4, kk)
+        rotated = w_flat[:, :, self.rot_index]
+        # -> (4, out, in, k, k) -> (4 * out, in, k, k)
+        rotated = rotated.permute(2, 0, 1, 3)
+        return rotated.reshape(
+            _ROTATIONS * self.out_channels,
+            self.in_channels,
+            self.kernel_size,
+            self.kernel_size,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         weight = self._rotated_weight()
@@ -113,15 +147,23 @@ class P4ConvP4(nn.Module):
         nn.init.kaiming_uniform_(self.weight, a=0, mode="fan_in", nonlinearity="relu")
         self.bias = nn.Parameter(torch.zeros(out_channels)) if bias else None
 
+        self.register_buffer("rot_index", _build_rot_index(kernel_size), persistent=False)
+        self.register_buffer("roll_index", _build_roll_index(), persistent=False)
+
     def _transformed_weight(self) -> torch.Tensor:
+        # Flatten the trailing spatial dims so both transforms become gathers
+        # (index_select) rather than rot90/roll, keeping this torch.compile-safe.
+        w_flat = self.weight.reshape(
+            self.out_channels, self.in_channels, _ROTATIONS, -1
+        )  # (out, in, 4, kk)
         transformed = []
         for r in range(_ROTATIONS):
             # Rotate the filter spatially by r * 90 degrees...
-            w = torch.rot90(self.weight, k=r, dims=(-2, -1))
+            w = w_flat[:, :, :, self.rot_index[r]]  # (out, in, 4, kk)
             # ...and cyclically shift the input-orientation axis by r.
-            w = torch.roll(w, shifts=r, dims=2)
+            w = w[:, :, self.roll_index[r], :]  # (out, in, 4, kk)
             transformed.append(w)
-        # (4, out, in, 4, k, k) -> (4 * out, in * 4, k, k)
+        # (4, out, in, 4, kk) -> (4 * out, in * 4, k, k)
         weight = torch.stack(transformed, dim=0)
         return weight.reshape(
             _ROTATIONS * self.out_channels,

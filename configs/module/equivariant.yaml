@@ -1,11 +1,37 @@
-defaults:
- - vit_s_16.yaml
+_target_: src.modules.imagenet_module.ImageNetModule
+
+# NOTE: this config intentionally does NOT inherit vit_s_16.yaml. That base
+# defines a `net:` block with ViT-only keys (image_size, patch_size, ...), which
+# Hydra would deep-merge into the `net` below and forward to EquivariantNet,
+# raising `unexpected keyword argument 'image_size'`. Keeping this standalone
+# guarantees only EquivariantNet's own arguments are passed.
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-3
+  weight_decay: 1e-4
+
+main_scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: null # Requires knowing total number of training steps, initialized in train.py
+    eta_min: 0
+
+warmup_steps: 1e4
+
+warmup_scheduler:
+    _target_: torch.optim.lr_scheduler.LinearLR
+    _partial_: true
+    start_factor: 1e-2
+    total_iters: ${module.warmup_steps}
 
 # p4 group-equivariant CNN (rotation + translation equivariant), ResNet-18 layout.
 net:
   _target_: src.modules.nets.equivariant_net.EquivariantNet
   num_classes: 1000
   in_channels: 3
-  base_channels: 32
+  # base_channels: 32
+  base_channels: 24
   layers: [2, 2, 2, 2]
   stem_kernel_size: 7

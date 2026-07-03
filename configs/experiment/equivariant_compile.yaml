@@ -13,13 +13,14 @@ seed: 42
 # Remember to define experiment_name and tags in all your experiments!
 # First tag options: data, explore, baseline, ablate, hyperparam, final, <custom tag>
 # Second tag options: train, pre-train, post-train, debug, <custom tag>
-experiment_name: "equivariant"
+experiment_name: "equivariant_compile"
 tags: ["explore", "train"]
 
-# Group convolutions and rot90/roll weight transforms don't trace cleanly under
-# torch.compile; keep it off for correctness/stability.
+# The group-conv weight transforms are implemented as static index gathers
+# (see equivariant_net.py), so torch.compile traces them cleanly.
 module:
-  compile: false
+  compile: true
 
-datamodule:
-  num_workers_train: 2
+# datamodule:
+#   num_workers_train: 8
+
