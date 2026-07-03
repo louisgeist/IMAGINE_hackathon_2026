@@ -24,7 +24,6 @@ class GatedVisionTransformer(VisionTransformer):
         representation_size: Optional[int] = None,
         norm_layer: Callable[..., nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         conv_stem_configs: Optional[list[ConvStemConfig]] = None,
-        gate_bias: float = 2.0,
     ) -> None:
         super().__init__(
             image_size=image_size,
@@ -49,5 +48,4 @@ class GatedVisionTransformer(VisionTransformer):
             dropout,
             attention_dropout,
             norm_layer,
-            gate_bias=gate_bias,
         )

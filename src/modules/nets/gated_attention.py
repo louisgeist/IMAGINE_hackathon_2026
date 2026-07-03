@@ -7,25 +7,20 @@ import torch.nn.functional as F
 
 
 class GatedMultiheadAttention(nn.Module):
-    """Multi-head self-attention with a sigmoid gate on the attention output.
+    """Multi-head self-attention with per-head sigmoid gating on the SDPA output.
 
-    The gate modulates how much of the attention output is passed through before
-    the output projection::
-
-        attn_out = SDPA(Q, K, V)
-        output = out_proj(sigmoid(gate_proj(x)) * attn_out)
-
-  This follows the gated-attention design used in recent transformer work, where
-    element-wise gating gives the model finer control over information flow in
-    each block.
+    The query projection is widened to produce both Q and per-head gate scores.
+    Gate scores modulate the SDPA output via sigmoid before the output projection.
+    cf. https://arxiv.org/abs/2505.06708
     """
 
     def __init__(
         self,
         embed_dim: int,
         num_heads: int,
-        dropout: float = 0.0,
-        gate_bias: float = 2.0,
+        qkv_bias: bool = True,
+        attn_dropout: float = 0.0,
+        proj_dropout: float = 0.0,
     ) -> None:
         super().__init__()
         if embed_dim % num_heads != 0:
@@ -36,42 +31,42 @@ class GatedMultiheadAttention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.dropout = dropout
 
-        self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
-        self.gate_proj = nn.Linear(embed_dim, embed_dim)
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.wq = nn.Linear(embed_dim, embed_dim * 2, bias=qkv_bias)
+        self.wk = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.wv = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_dropout)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj_drop = nn.Dropout(proj_dropout)
 
-        self._reset_parameters(gate_bias)
+        self._reset_parameters()
 
-    def _reset_parameters(self, gate_bias: float) -> None:
-        for module in (self.q_proj, self.k_proj, self.v_proj, self.out_proj):
+    def _reset_parameters(self) -> None:
+        for module in (self.wq, self.wk, self.wv, self.proj):
             nn.init.xavier_uniform_(module.weight)
             if module.bias is not None:
-                nn.init.zeros_(module.bias)
-
-        nn.init.xavier_uniform_(self.gate_proj.weight)
-        nn.init.constant_(self.gate_proj.bias, gate_bias)
+                nn.init.normal_(module.bias, std=1e-6)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_length, _ = x.shape
 
-        q = self.q_proj(x).view(batch_size, seq_length, self.num_heads, self.head_dim)
-        k = self.k_proj(x).view(batch_size, seq_length, self.num_heads, self.head_dim)
-        v = self.v_proj(x).view(batch_size, seq_length, self.num_heads, self.head_dim)
+        q_raw = self.wq(x).view(batch_size, seq_length, self.num_heads, -1)
+        q, gate_score = torch.split(q_raw, [self.head_dim, self.head_dim], dim=-1)
+
+        k = self.wk(x).reshape(batch_size, seq_length, self.num_heads, self.head_dim)
+        v = self.wv(x).reshape(batch_size, seq_length, self.num_heads, self.head_dim)
 
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        dropout_p = self.dropout if self.training else 0.0
-        attn_out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
-        attn_out = attn_out.transpose(1, 2).reshape(batch_size, seq_length, self.embed_dim)
+        dropout_p = self.attn_drop.p if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
 
-        gate = torch.sigmoid(self.gate_proj(x))
-        return self.out_proj(gate * attn_out)
+        out = out.transpose(1, 2).contiguous()
+        out = out * torch.sigmoid(gate_score)
+        out = out.reshape(batch_size, seq_length, self.embed_dim)
+        return self.proj_drop(self.proj(out))
 
 
 class GatedEncoderBlock(nn.Module):
@@ -85,7 +80,6 @@ class GatedEncoderBlock(nn.Module):
         dropout: float,
         attention_dropout: float,
         norm_layer: Callable[..., nn.Module] = partial(nn.LayerNorm, eps=1e-6),
-        gate_bias: float = 2.0,
     ) -> None:
         super().__init__()
 
@@ -93,8 +87,8 @@ class GatedEncoderBlock(nn.Module):
         self.self_attention = GatedMultiheadAttention(
             hidden_dim,
             num_heads,
-            dropout=attention_dropout,
-            gate_bias=gate_bias,
+            attn_dropout=attention_dropout,
+            proj_dropout=dropout,
         )
         self.dropout = nn.Dropout(dropout)
 
@@ -109,7 +103,8 @@ class GatedEncoderBlock(nn.Module):
             f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}",
         )
         x = self.ln_1(input)
-        x = self.dropout(self.self_attention(x))
+        x = self.self_attention(x)
+        x = self.dropout(x)
         x = x + input
 
         y = self.ln_2(x)
@@ -130,7 +125,6 @@ class GatedEncoder(nn.Module):
         dropout: float,
         attention_dropout: float,
         norm_layer: Callable[..., nn.Module] = partial(nn.LayerNorm, eps=1e-6),
-        gate_bias: float = 2.0,
     ) -> None:
         super().__init__()
         self.pos_embedding = nn.Parameter(
@@ -146,7 +140,6 @@ class GatedEncoder(nn.Module):
                     dropout,
                     attention_dropout,
                     norm_layer,
-                    gate_bias=gate_bias,
                 )
                 for _ in range(num_layers)
             ]

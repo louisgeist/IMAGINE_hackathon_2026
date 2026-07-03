@@ -6,4 +6,3 @@ _target_: src.modules.gated_attention.GatedAttentionImageNetModule
 # ViT-S/16 with gated self-attention
 net:
   _target_: src.modules.nets.gated_vision_transformer.GatedVisionTransformer
-  gate_bias: 2.0
