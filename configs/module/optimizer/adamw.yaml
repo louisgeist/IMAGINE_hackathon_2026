@@ -1,0 +1,5 @@
+# @package module.optimizer
+_target_: torch.optim.AdamW
+_partial_: true
+lr: 1e-3
+weight_decay: 1e-4
