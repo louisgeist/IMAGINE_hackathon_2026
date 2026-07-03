@@ -53,6 +53,7 @@ class ImageNetModule(LightningModule):
         cutmix_alpha: float,
         num_classes: int = 1000,
         warmup_scheduler: torch.optim.lr_scheduler = None,
+        uint8_pipeline: bool = True,
     ) -> None:
         """Initialize an `ImageNetModule`.
 
@@ -62,6 +63,10 @@ class ImageNetModule(LightningModule):
         :param warmup_steps: The number of warmup steps to use for training. If 0, no warmup scheduler will be used.
         :param main_scheduler: The main learning rate scheduler to use for training.
         :param warmup_scheduler: The learning rate scheduler to use for warmup.
+        :param uint8_pipeline: If `True`, batches arrive as uint8 tensors and normalization plus
+            CutMix/MixUp are applied here, on GPU. If `False`, the datamodule already normalized
+            the images and applied CutMix/MixUp on CPU, so this module leaves batches untouched.
+            Must be kept in sync with `ImageNetDataModule`'s `uint8_pipeline` flag.
         """
         super().__init__()
 
@@ -69,27 +74,27 @@ class ImageNetModule(LightningModule):
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=True, ignore=["net"])
 
-        imagenet_mean = (0.485, 0.456, 0.406)
-        imagenet_std = (0.229, 0.224, 0.225)
-        self.normalise = aug.Normalize(mean=imagenet_mean, std=imagenet_std)
-        self.mixup_alpha = mixup_alpha
-        self.cutmix_alpha = cutmix_alpha
+        self.uint8_pipeline = uint8_pipeline
 
-        mixup_cutmix = []
-        if mixup_alpha > 0:
-            mixup_cutmix.append(T.MixUp(alpha=mixup_alpha, num_classes=num_classes))
-        if cutmix_alpha > 0:
-            mixup_cutmix.append(T.CutMix(alpha=cutmix_alpha, num_classes=num_classes))
+        if uint8_pipeline:
+            imagenet_mean = (0.485, 0.456, 0.406)
+            imagenet_std = (0.229, 0.224, 0.225)
 
-        self.cutmix_mixup = T.RandomChoice(mixup_cutmix)
+            mixup_cutmix = []
+            if mixup_alpha > 0:
+                mixup_cutmix.append(T.MixUp(alpha=mixup_alpha, num_classes=num_classes))
+            if cutmix_alpha > 0:
+                mixup_cutmix.append(T.CutMix(alpha=cutmix_alpha, num_classes=num_classes))
 
-        self.train_augmentations = aug.AugmentationSequential(
-            aug.Normalize(mean=imagenet_mean, std=imagenet_std),
-            # Add more here if necessary
-        )
-        self.valid_augmentations = aug.AugmentationSequential(
-            aug.Normalize(mean=imagenet_mean, std=imagenet_std)
-        )
+            self.cutmix_mixup = T.RandomChoice(mixup_cutmix)
+
+            self.train_augmentations = aug.AugmentationSequential(
+                aug.Normalize(mean=imagenet_mean, std=imagenet_std),
+                # Add more here if necessary
+            )
+            self.valid_augmentations = aug.AugmentationSequential(
+                aug.Normalize(mean=imagenet_mean, std=imagenet_std)
+            )
 
         self.net = net
 
@@ -153,11 +158,12 @@ class ImageNetModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
-        source, targets = batch
-        source = source.float() / 255.0
-        source = self.train_augmentations(source)
-        batch = (source, targets)
-        batch = self.cutmix_mixup(batch)
+        if self.uint8_pipeline:
+            source, targets = batch
+            source = source.float() / 255.0
+            source = self.train_augmentations(source)
+            batch = (source, targets)
+            batch = self.cutmix_mixup(batch)
 
         loss, logits, targets = self.model_step(batch)
 
@@ -187,10 +193,11 @@ class ImageNetModule(LightningModule):
             labels.
         :param batch_idx: The index of the current batch.
         """
-        source, targets = batch
-        source = source.float() / 255.0
-        source = self.valid_augmentations(source)
-        batch = (source, targets)
+        if self.uint8_pipeline:
+            source, targets = batch
+            source = source.float() / 255.0
+            source = self.valid_augmentations(source)
+            batch = (source, targets)
         loss, logits, targets = self.model_step(batch)
 
         # update and log metrics
@@ -210,9 +217,11 @@ class ImageNetModule(LightningModule):
             labels.
         :param batch_idx: The index of the current batch.
         """
-        source, targets = batch
-        source = source.float() / 255.0
-        source = self.valid_augmentations(source)
+        if self.uint8_pipeline:
+            source, targets = batch
+            source = source.float() / 255.0
+            source = self.valid_augmentations(source)
+            batch = (source, targets)
 
         _, logits, targets = self.model_step(batch)
 

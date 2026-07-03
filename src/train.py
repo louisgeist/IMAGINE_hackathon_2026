@@ -80,6 +80,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         cfg.module,
         cutmix_alpha=cfg.datamodule.cutmix_alpha,
         mixup_alpha=cfg.datamodule.mixup_alpha,
+        uint8_pipeline=cfg.datamodule.uint8_pipeline,
     )
 
     log.info("Instantiating loggers...")

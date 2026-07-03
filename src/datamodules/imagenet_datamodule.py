@@ -95,7 +95,8 @@ class ImageNetDataModule(LightningDataModule):
         num_workers_val: int = 4,
         prefetch_factor: int = 2,
         pin_memory: bool = False,
-        persistent_workers: bool = False
+        persistent_workers: bool = False,
+        uint8_pipeline: bool = True,
     ) -> None:
         """Initialize an `ImageNetDataModule`.
 
@@ -118,6 +119,11 @@ class ImageNetDataModule(LightningDataModule):
         :param num_workers: The number of workers. Defaults to `0`.
         :param prefetch_factor: The number of batches to prefetch. Defaults to `2`.
         :param pin_memory: Whether to pin memory. Defaults to `False`.
+        :param uint8_pipeline: If `True`, images are handed to the model as uint8 tensors and
+            normalization/CutMix/MixUp are applied on GPU inside `ImageNetModule`. If `False`,
+            the legacy CPU-side pipeline is used instead: images are normalized to floats and
+            CutMix/MixUp/RandomErasing are applied here, via the dataloader's `collate_fn`.
+            Must be kept in sync with `ImageNetModule`'s `uint8_pipeline` flag.
         """
         super().__init__()
 
@@ -139,8 +145,20 @@ class ImageNetDataModule(LightningDataModule):
         self.ra_magnitude = ra_magnitude
         self.random_erase_prob = random_erase_prob
 
-        # if cutmix_alpha or mixup_alpha:
-        self.collate_fn = default_collate
+        self.uint8_pipeline = uint8_pipeline
+        self.imagenet_mean = (0.485, 0.456, 0.406)
+        self.imagenet_std = (0.229, 0.224, 0.225)
+
+        if uint8_pipeline:
+            self.collate_fn = default_collate
+        else:
+            mixup_cutmix = self._get_mixup_cutmix(
+                mixup_alpha=mixup_alpha, cutmix_alpha=cutmix_alpha
+            )
+            if mixup_cutmix is not None:
+                self.collate_fn = lambda batch: mixup_cutmix(*default_collate(batch))
+            else:
+                self.collate_fn = default_collate
 
         self.data_train: Optional[Dataset] = None
         self.data_val: Optional[Dataset] = None
@@ -181,30 +199,35 @@ class ImageNetDataModule(LightningDataModule):
                     T.AutoAugment(policy=aa_policy, interpolation=interpolation_mode)
                 )
 
-        train_transforms.extend(
-            [
-                T.PILToTensor(),
-                # T.ToDtype(torch.float, scale=True),
-                # T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std),
-            ]
-        )
-        # if self.random_erase_prob > 0:
-        #     train_transforms.append(T.RandomErasing(p=self.random_erase_prob))
+        train_transforms.append(T.PILToTensor())
+        if self.uint8_pipeline:
+            train_transforms.append(T.ToDtype(torch.uint8, scale=True))
+        else:
+            train_transforms.append(T.ToDtype(torch.float, scale=True))
+            train_transforms.append(
+                T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std)
+            )
+            if self.random_erase_prob > 0:
+                train_transforms.append(T.RandomErasing(p=self.random_erase_prob))
         train_transforms.append(T.ToPureTensor())
         return T.Compose(train_transforms)
 
     def _get_eval_augmentations(self) -> Callable:
         interpolation_mode = T.InterpolationMode(self.interpolation)
-        return T.Compose(
-            [
-                T.Resize(self.eval_resize_size, interpolation=interpolation_mode),
-                T.CenterCrop(self.eval_crop_size),
-                T.PILToTensor(),
-                T.ToDtype(torch.uint8, scale=True),
-                # T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std),
-                T.ToPureTensor(),
-            ]
-        )
+        eval_transforms = [
+            T.Resize(self.eval_resize_size, interpolation=interpolation_mode),
+            T.CenterCrop(self.eval_crop_size),
+            T.PILToTensor(),
+        ]
+        if self.uint8_pipeline:
+            eval_transforms.append(T.ToDtype(torch.uint8, scale=True))
+        else:
+            eval_transforms.append(T.ToDtype(torch.float, scale=True))
+            eval_transforms.append(
+                T.Normalize(mean=self.imagenet_mean, std=self.imagenet_std)
+            )
+        eval_transforms.append(T.ToPureTensor())
+        return T.Compose(eval_transforms)
 
     @property
     def num_classes(self) -> int:

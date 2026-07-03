@@ -18,3 +18,4 @@ auto_augment_policy: 'ra'
 ra_magnitude: 10
 cutmix_alpha: 0.0
 mixup_alpha: 0.2
+uint8_pipeline: False # if False, falls back to the old CPU-side float pipeline (normalize + CutMix/MixUp on CPU)

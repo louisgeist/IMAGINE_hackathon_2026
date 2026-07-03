@@ -40,7 +40,12 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.datamodule)
 
     log.info(f"Instantiating model <{cfg.module._target_}>")
-    model: LightningModule = hydra.utils.instantiate(cfg.module)
+    model: LightningModule = hydra.utils.instantiate(
+        cfg.module,
+        cutmix_alpha=cfg.datamodule.cutmix_alpha,
+        mixup_alpha=cfg.datamodule.mixup_alpha,
+        uint8_pipeline=cfg.datamodule.uint8_pipeline,
+    )
 
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
