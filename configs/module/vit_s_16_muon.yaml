@@ -1,9 +1,38 @@
-defaults:
- - vit_s_16.yaml
- - override optimizer: muon
+# defaults:
+#  - vit_s_16.yaml
+#  - override optimizer: muon
 
 # The Muon optimizer (Muon on hidden weight matrices, auxiliary AdamW on
 # embeddings / head / gains & biases) is selected as a config group above so it
 # fully replaces the base AdamW optimizer instead of merging with it.
+
+defaults:
+  - optimizer: muon
+  - _self_
+
 _target_: src.modules.imagenet_muon_module.ImageNetMuonModule
+
+main_scheduler:
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+    _partial_: true
+    T_max: null # Requires knowing total number of training steps, initialized in train.py
+    eta_min: 0
+
+warmup_steps: 1e4
+
+warmup_scheduler:
+    _target_: torch.optim.lr_scheduler.LinearLR
+    _partial_: true
+    start_factor: 1e-2
+    total_iters: ${module.warmup_steps}
+
+# ViT-S/16
+net:
+  _target_: src.modules.nets.vision_transformer.VisionTransformer
+  image_size: 224
+  patch_size: 16
+  num_layers: 12
+  num_heads: 6
+  hidden_dim: 384
+  mlp_dim: 1536
 
