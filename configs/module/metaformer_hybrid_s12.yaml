@@ -1,0 +1,29 @@
+_target_: src.modules.imagenet_module.ImageNetModule
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-3
+  weight_decay: 1e-4
+
+main_scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _partial_: true
+  T_max: null
+  eta_min: 0
+
+warmup_steps: 1e4
+
+warmup_scheduler:
+  _target_: torch.optim.lr_scheduler.LinearLR
+  _partial_: true
+  start_factor: 1e-2
+  total_iters: ${module.warmup_steps}
+
+# Hybrid MetaFormer S12: [Pool, Pool, Attention, Attention] (~16.5M params).
+# Optimizer aligned with ViT-S/16 baseline (wd=1e-4). Paper uses wd=0.05 @ bs=1024/300ep,
+# which is unstable here (val/acc5 collapse also seen on poolformerv2_s12).
+net:
+  _target_: src.modules.nets.metaformer_hybrid.MetaFormerHybridClassifier
+  num_classes: 1000
+  drop_path_rate: 0.05

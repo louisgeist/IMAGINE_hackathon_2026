@@ -1,3 +1,5 @@
+import re
+import subprocess
 import warnings
 from importlib.util import find_spec
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -117,3 +119,21 @@ def get_metric_value(metric_dict: Dict[str, Any], metric_name: Optional[str]) ->
     log.info(f"Retrieved metric value! <{metric_name}={metric_value}>")
 
     return metric_value
+
+
+def rsync_upload(src: str, dest: str) -> int:
+    """Upload a file via rsync, using --mkpath only when supported (rsync >= 3.2.3)."""
+    cmd = ["rsync", "-avz"]
+    version_out = subprocess.run(
+        ["rsync", "--version"], capture_output=True, text=True, check=True
+    ).stdout
+    match = re.search(r"rsync\s+version\s+(\d+)\.(\d+)\.(\d+)", version_out)
+    if match and tuple(map(int, match.groups())) >= (3, 2, 3):
+        cmd.append("--mkpath")
+    elif match:
+        log.warning(
+            f"rsync {match.group(1)}.{match.group(2)}.{match.group(3)} lacks --mkpath, "
+            "uploading without it"
+        )
+    cmd.extend([src, dest])
+    return subprocess.call(cmd)

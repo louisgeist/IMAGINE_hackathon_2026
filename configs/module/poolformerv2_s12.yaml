@@ -1,0 +1,29 @@
+_target_: src.modules.imagenet_module.ImageNetModule
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 4e-3
+  weight_decay: 0.05
+
+main_scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _partial_: true
+  T_max: null
+  eta_min: 0
+
+warmup_steps: 1e4
+
+warmup_scheduler:
+  _target_: torch.optim.lr_scheduler.LinearLR
+  _partial_: true
+  start_factor: 1e-2
+  total_iters: ${module.warmup_steps}
+
+# PoolFormerV2-S12 from MetaFormer (timm), ~12M params, token mixer = pooling
+net:
+  _target_: src.modules.nets.timm_classifier.TimmClassifier
+  model_name: poolformerv2_s12
+  num_classes: 1000
+  pretrained: false
+  drop_path_rate: 0.1

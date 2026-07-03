@@ -1,0 +1,18 @@
+# @package _global_
+#
+# Hybrid MetaFormer S12: pooling (stages 1-2) + self-attention (stages 3-4).
+# ~16.5M params — lighter than ViT-S/16 (~22M), stronger than pure PoolFormer (~12M).
+# Uses ViT-like optimizer (lr=1e-3, wd=1e-4) — not paper wd=0.05 which diverges at bs=512.
+# Launch:
+#   uv run src/train.py experiment=arch_metaformer_hybrid
+#
+# If OOM: datamodule.batch_size=256 datamodule.num_workers=8
+
+defaults:
+  - override /module: metaformer_hybrid_s12
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+experiment_name: "metaformer_hybrid_s12"
+tags: ["explore", "train"]

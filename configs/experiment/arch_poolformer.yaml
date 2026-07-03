@@ -1,0 +1,17 @@
+# @package _global_
+#
+# PoolFormerV2-S12 (MetaFormer baseline, pooling token mixer) via timm.
+# Launch:
+#   uv run src/train.py experiment=arch_poolformer
+#
+# Smaller model (~12M params) — batch 512 is usually OK at 224x224.
+# If OOM: datamodule.batch_size=256 datamodule.num_workers=8
+
+defaults:
+  - override /module: poolformerv2_s12
+  - override /trainer: imagenet_vit_s_16
+
+seed: 42
+
+experiment_name: "poolformerv2_s12"
+tags: ["explore", "train"]
