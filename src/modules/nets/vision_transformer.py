@@ -14,21 +14,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-@lru_cache(maxsize=None)
-def _nested_order(n: int) -> tuple[int, ...]:
-    """Bit-reversal order of [0, n): any prefix is evenly spread, and prefixes are nested
-    (the coords for a smaller prefix are a subset of those for a larger one)."""
-    bits = max(1, (n - 1).bit_length())
-    return tuple(r for i in range(1 << bits) if (r := int(f"{i:0{bits}b}"[::-1], 2)) < n)
-
-
-def _grid_keep_indices(n_side: int, num_keep: int, device: torch.device) -> torch.Tensor:
-    """Flat indices of a nested n_side x n_side grid, kept count close to num_keep."""
-    keep_side = max(1, min(n_side, round(num_keep**0.5)))
-    coords = torch.tensor(_nested_order(n_side)[:keep_side], device=device)
-    return (coords.unsqueeze(1) * n_side + coords.unsqueeze(0)).flatten()
-
-
 class ConvStemConfig(NamedTuple):
     out_channels: int
     kernel_size: int
@@ -107,8 +92,8 @@ class VisionTransformer(nn.Module):
         image_size: int,
         patch_size: int,
         hidden_dim: int,
-        num_layers: int,
-        num_heads: int,
+        # num_layers: int,
+        # num_heads: int,
         mlp_dim: int,
         encoder: Callable[..., nn.Module],
         dropout: float = 0.0,
@@ -116,8 +101,6 @@ class VisionTransformer(nn.Module):
         representation_size: Optional[int] = None,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         conv_stem_configs: Optional[list[ConvStemConfig]] = None,
-        patch_drop_rate: float = 0.0,
-        patch_drop_mode: str = "random",
         pos_embedding_type: str = "learned",
         patch_stem: str = "patchify",
         num_registers=0,
@@ -133,7 +116,7 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.representation_size = representation_size
         self.norm_layer = norm_layer
-        self.num_registers = 0
+        self.num_registers = num_registers
 
         if conv_stem_configs is not None:
             # As per https://arxiv.org/abs/2106.14881
@@ -186,23 +169,25 @@ class VisionTransformer(nn.Module):
         # Add a class token
         self.class_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
         seq_length += 1
-        
+
+        if num_registers > 0:
+            self.registers = nn.Parameter(torch.zeros(1, num_registers, hidden_dim))
+            nn.init.trunc_normal_(self.registers, std=0.02)
+            seq_length += num_registers
 
         self.encoder = encoder(
             seq_length=seq_length,
             hidden_dim=hidden_dim,
+            pos_embedding_type=pos_embedding_type,
+            num_registers=num_registers,
         )
         self.seq_length = seq_length
 
         heads_layers: OrderedDict[str, nn.Module] = OrderedDict()
         if representation_size is None:
-            heads_layers["head"] = nn.Linear(
-                hidden_dim * (self.num_registers + 1), num_classes
-            )
+            heads_layers["head"] = nn.Linear(hidden_dim, num_classes)
         else:
-            heads_layers["pre_logits"] = nn.Linear(
-                hidden_dim * (self.num_registers + 1), representation_size
-            )
+            heads_layers["pre_logits"] = nn.Linear(hidden_dim, representation_size)
             heads_layers["act"] = nn.Tanh()
             heads_layers["head"] = nn.Linear(representation_size, num_classes)
 
@@ -284,7 +269,7 @@ class VisionTransformer(nn.Module):
 
         x = self.encoder(x, n_side=self.image_size // self.patch_size)
 
-        x = x[:, : self.num_registers + 1].flatten(1)
+        x = x[:, 0]
 
         x = self.heads(x)
 
@@ -294,15 +279,15 @@ class VisionTransformer(nn.Module):
 def build_2d_sincos_pos_embedding(
     seq_length: int,
     hidden_dim: int,
-    has_class_token: bool = True,
+    num_prefix_tokens: int = 1,
     temperature: float = 10000.0,
 ) -> torch.Tensor:
     """Fixed 2D sine-cosine positional embedding (as in MAE / DeiT-III).
 
-    Returns a (1, seq_length, hidden_dim) tensor. When ``has_class_token`` is True the first
-    position is left as zeros to align with the prepended ``[CLS]`` token.
+    Returns a (1, seq_length, hidden_dim) tensor. The first ``num_prefix_tokens`` positions
+    (``[CLS]`` and optional register tokens) are left as zeros; patch positions get 2D sincos.
     """
-    n_patches = seq_length - 1 if has_class_token else seq_length
+    n_patches = seq_length - num_prefix_tokens
     grid = int(math.isqrt(n_patches))
     torch._assert(
         grid * grid == n_patches, "sincos pos-embed requires a square patch grid"
@@ -318,8 +303,8 @@ def build_2d_sincos_pos_embedding(
     pe = torch.cat(
         [ox.sin(), ox.cos(), oy.sin(), oy.cos()], dim=1
     )  # (n_patches, hidden_dim)
-    if has_class_token:
-        pe = torch.cat([torch.zeros(1, hidden_dim), pe], dim=0)
+    if num_prefix_tokens > 0:
+        pe = torch.cat([torch.zeros(num_prefix_tokens, hidden_dim), pe], dim=0)
     return pe.unsqueeze(0)  # (1, seq_length, hidden_dim)
 
 
@@ -412,7 +397,66 @@ class RoPESelfAttention(nn.Module):
         out = out.transpose(1, 2).reshape(b, n, c)  # (b, n, c)
         return self.out_proj(out)
 
+class QKNormAttention(nn.Module):
+    """Multi-head self-attention with optional Qwen-style QK-Norm.
 
+    Drop-in replacement for ``nn.MultiheadAttention`` (batch_first, self-attention
+    only). When ``use_qk_norm`` is True, RMSNorm is applied to the queries and keys
+    over the per-head dimension before the dot product. Attention itself is computed
+    with ``F.scaled_dot_product_attention`` so the Flash Attention backend (forced in
+    ``train.py``) is preserved.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        attention_dropout: float,
+        use_qk_norm: bool = True,
+    ):
+        super().__init__()
+        torch._assert(
+            hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
+        )
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.attention_dropout = attention_dropout
+
+        self.in_proj = nn.Linear(hidden_dim, 3 * hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+
+        # A single set of head_dim weights, shared across all heads.
+        self.q_norm = nn.RMSNorm(self.head_dim) if use_qk_norm else nn.Identity()
+        self.k_norm = nn.RMSNorm(self.head_dim) if use_qk_norm else nn.Identity()
+
+        # Match nn.MultiheadAttention's initialization for comparability.
+        nn.init.xavier_uniform_(self.in_proj.weight)
+        nn.init.zeros_(self.in_proj.bias)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, N, C = x.shape
+        # (B, N, 3 * C) -> (B, N, 3, num_heads, head_dim)
+        qkv = self.in_proj(x).reshape(B, N, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.unbind(2)  # each (B, N, num_heads, head_dim)
+
+        q = self.q_norm(q)  # Qwen QK-Norm over head_dim
+        k = self.k_norm(k)
+
+        # (B, N, num_heads, head_dim) -> (B, num_heads, N, head_dim)
+        q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.attention_dropout if self.training else 0.0,
+        )
+
+        # (B, num_heads, N, head_dim) -> (B, N, C)
+        x = x.transpose(1, 2).reshape(B, N, C)
+        return self.out_proj(x)
 class Encoder(nn.Module):
     """Transformer Model Encoder for sequence to sequence translation."""
 
@@ -429,6 +473,7 @@ class Encoder(nn.Module):
         use_qk_norm: bool = False,
         use_swiglu: bool = False,
         pos_embedding_type: str = "learned",
+        num_registers: int = 0,
     ):
         super().__init__()
         # Note that batch_size is on the first dim because
@@ -443,7 +488,7 @@ class Encoder(nn.Module):
             self.register_buffer(
                 "pos_embedding",
                 build_2d_sincos_pos_embedding(
-                    seq_length, hidden_dim, has_class_token=True
+                    seq_length, hidden_dim, num_prefix_tokens=1 + num_registers
                 ),
                 persistent=False,
             )
@@ -457,8 +502,6 @@ class Encoder(nn.Module):
                 "expected 'learned', 'sincos' or 'rope'"
             )
         self.dropout = nn.Dropout(dropout)
-        self.patch_drop_rate = patch_drop_rate
-        self.patch_drop_mode = patch_drop_mode
         layers: OrderedDict[str, nn.Module] = OrderedDict()
         for i in range(num_layers):
             layers[f"encoder_layer_{i}"] = EncoderBlock(
@@ -496,6 +539,7 @@ class EncoderBlock(nn.Module):
         attention_dropout: float,
         norm_layer: Callable[..., torch.nn.Module] = partial(nn.LayerNorm, eps=1e-6),
         use_qk_norm: bool = False,
+        use_swiglu: bool = False,
         rotary: Optional[RotaryEmbedding] = None,
     ):
         super().__init__()
@@ -531,10 +575,7 @@ class EncoderBlock(nn.Module):
             f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}",
         )
         x = self.ln_1(input)
-        if self.uses_rope:
-            x = self.self_attention(x)
-        else:
-            x, _ = self.self_attention(x, x, x, need_weights=False)
+        x = self.self_attention(x)
         x = self.dropout(x)
         x = x + input
 

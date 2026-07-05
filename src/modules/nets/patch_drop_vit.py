@@ -24,18 +24,27 @@ class PatchDropVisionTransformer(VisionTransformer):
     """VisionTransformer with patch dropping during training, kept out of the shared
     VisionTransformer on purpose (only the patch_drop experiment instantiates this class).
 
-    `patch_drop_rate` is scheduled per-epoch by ImageNetModule. Dropping happens after the
-    additive positional embedding, so this requires an encoder with `pos_embedding` set
-    ('learned' or 'sincos', not 'rope' whose positions live inside attention and would
-    desync with dropped tokens).
+    `patch_drop_rate` is scheduled per-epoch by ImageNetModule via `net.encoder.patch_drop_rate`.
+    Dropping happens after the additive positional embedding, so this requires an encoder with
+    `pos_embedding` set ('learned' or 'sincos', not 'rope' whose positions live inside attention
+    and would desync with dropped tokens).
     """
 
     def __init__(self, *args, patch_drop_rate: float = 0.0, patch_drop_mode: str = "random", **kwargs):
         super().__init__(*args, **kwargs)
         if getattr(self.encoder, "pos_embedding", None) is None:
             raise ValueError("PatchDropVisionTransformer requires an additive pos embedding")
-        self.patch_drop_rate = patch_drop_rate
+        # ImageNetModule anneals patch_drop_rate on the encoder each epoch.
+        self.encoder.patch_drop_rate = patch_drop_rate
         self.patch_drop_mode = patch_drop_mode
+
+    @property
+    def patch_drop_rate(self) -> float:
+        return self.encoder.patch_drop_rate
+
+    @patch_drop_rate.setter
+    def patch_drop_rate(self, value: float) -> None:
+        self.encoder.patch_drop_rate = value
 
     def forward(self, x: torch.Tensor):
         x = self._process_input(x)
@@ -46,9 +55,10 @@ class PatchDropVisionTransformer(VisionTransformer):
         enc = self.encoder
         x = x + enc.pos_embedding
 
-        if self.training and self.patch_drop_rate > 0:
+        patch_drop_rate = enc.patch_drop_rate
+        if self.training and patch_drop_rate > 0:
             cls_token, patches = x[:, :1], x[:, 1:]
-            num_keep = max(1, int(patches.shape[1] * (1 - self.patch_drop_rate)))
+            num_keep = max(1, int(patches.shape[1] * (1 - patch_drop_rate)))
             if self.patch_drop_mode == "grid":
                 # fixed nested grid, like increasing resolution little by little
                 n_side = self.image_size // self.patch_size
